@@ -1,18 +1,37 @@
-#include <iostream>
-#include "DirectXInuit.h"Windows.h"
-#include <d3d11.h>
-#include "game_init.h"
-#include "game_logic.h"
-#include "render.h"
-#include "ProceduralTerrain.h"
-#include "Collision.h"
-#include "AI.h"
-#include "Matchmaking.h"
-#include "Leaderboards.h"
-#include "Networking.h"
-#include "utils.h 
-    #include #utils.cpp
-    
+// DirectXInuit.h
+#ifndef DIRECTXINUIT_H
+#define DIRECTXINUIT_H
+
+"/link",
+"d3d11.lib",
+"dxgi.lib",
+"d3dcompiler.lib",
+"kernel32.lib",
+"user32.lib",
+"gdi32.lib",
+"winmm.lib",
+"advapi32.lib",
+"shell32.lib",
+"ole32.lib",
+"oleaut32.lib",
+"uuid.lib"
+#include <iostream>/ Include if you use std::cerr in this header
+
+// Declare DirectX variables as extern so they can be accessed from other files
+extern IDXGISwapChain* swapChain;
+extern ID3D11DeviceContext* deviceContext;
+extern ID3D11Device* device;
+extern ID3D11RenderTargetView* renderTargetView;
+
+// Function prototypes
+HRESULT InitializeDirectX(HWND hWnd);
+void CleanupDirectX();
+
+#endif
+
+// ... your DirectX variable declarations and function prototypes ...
+
+#endif
 // DirectX Headers
 #pragma comment(lib, "d3d11.lib")
 #pragma comment(lib, "dxgi.lib")

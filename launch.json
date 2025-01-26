@@ -1,0 +1,17 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+      {
+        "name": "Run Game",
+        "type": "cppdbg",
+        "request": "launch",
+        "program": "${workspaceFolder}/main.exe",  // Replace with the path to your compiled executable
+        "args": [],  // Add arguments if needed
+        "stopAtEntry": false,
+        "cwd": "${workspaceFolder}",
+        "environment": [],
+        "console": "integratedTerminal",
+        "preLaunchTask": "Build Game"
+      }
+    ]
+  }  
