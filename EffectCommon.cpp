@@ -4,12 +4,13 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 //
-// http://go.microsoft.com/fwlink/?LinkId=248929
+// http://go.microsoft.com/fwlink/?LinkID=615561
 //--------------------------------------------------------------------------------------
 
 #include "pch.h"
 #include "EffectCommon.h"
 #include "DemandCreate.h"
+#include "ResourceUploadBatch.h"
 
 using namespace DirectX;
 using Microsoft::WRL::ComPtr;
@@ -36,8 +37,7 @@ EffectMatrices::EffectMatrices() noexcept
 
 
 // Lazily recomputes the combined world+view+projection matrix.
-_Use_decl_annotations_
-void EffectMatrices::SetConstants(int& dirtyFlags, XMMATRIX& worldViewProjConstant)
+_Use_decl_annotations_ void EffectMatrices::SetConstants(int& dirtyFlags, XMMATRIX& worldViewProjConstant)
 {
     if (dirtyFlags & EffectDirtyFlags::WorldViewProj)
     {
@@ -180,7 +180,8 @@ _Use_decl_annotations_ void EffectLights::InitializeConstants(XMVECTOR& specular
 
 
 // Lazily recomputes derived parameter values used by shader lighting calculations.
-_Use_decl_annotations_ void EffectLights::SetConstants(int& dirtyFlags, EffectMatrices const& matrices, XMMATRIX& worldConstant, XMVECTOR worldInverseTransposeConstant[3], XMVECTOR& eyePositionConstant, XMVECTOR& diffuseColorConstant, XMVECTOR& emissiveColorConstant, bool lightingEnabled)
+_Use_decl_annotations_
+void EffectLights::SetConstants(int& dirtyFlags, EffectMatrices const& matrices, XMMATRIX& worldConstant, XMVECTOR worldInverseTransposeConstant[3], XMVECTOR& eyePositionConstant, XMVECTOR& diffuseColorConstant, XMVECTOR& emissiveColorConstant, bool lightingEnabled)
 {
     if (lightingEnabled)
     {
@@ -358,21 +359,20 @@ void EffectLights::EnableDefaultLighting(_In_ IEffectLights* effect)
 
     static const XMVECTORF32 defaultDiffuse[MaxDirectionalLights] =
     {
-        { { { 1.0000000f, 0.9607844f, 0.8078432f, 0 } }  },
-        { { { 0.9647059f, 0.7607844f, 0.4078432f, 0 } }  },
-        { { { 0.3231373f, 0.3607844f, 0.3937255f, 0 } }  },
+        { { { 1.0000000f, 0.9607844f, 0.8078432f, 0 } } },
+        { { { 0.9647059f, 0.7607844f, 0.4078432f, 0 } } },
+        { { { 0.3231373f, 0.3607844f, 0.3937255f, 0 } } },
     };
 
     static const XMVECTORF32 defaultSpecular[MaxDirectionalLights] =
     {
-        { { { 1.0000000f, 0.9607844f, 0.8078432f, 0 } }  },
-        { { { 0.0000000f, 0.0000000f, 0.0000000f, 0 } }  },
-        { { { 0.3231373f, 0.3607844f, 0.3937255f, 0 } }  },
+        { { { 1.0000000f, 0.9607844f, 0.8078432f, 0 } } },
+        { { { 0.0000000f, 0.0000000f, 0.0000000f, 0 } } },
+        { { { 0.3231373f, 0.3607844f, 0.3937255f, 0 } } },
     };
 
     static const XMVECTORF32 defaultAmbient = { { { 0.05333332f, 0.09882354f, 0.1819608f, 0 } } };
 
-    effect->SetLightingEnabled(true);
     effect->SetAmbientLightColor(defaultAmbient);
 
     for (int i = 0; i < MaxDirectionalLights; i++)
@@ -385,111 +385,18 @@ void EffectLights::EnableDefaultLighting(_In_ IEffectLights* effect)
 }
 
 
-// Gets or lazily creates the specified vertex shader permutation.
-ID3D11VertexShader* EffectDeviceResources::DemandCreateVertexShader(_Inout_ ComPtr<ID3D11VertexShader>& vertexShader, ShaderBytecode const& bytecode)
+// Gets or lazily creates the specified root signature.
+ID3D12RootSignature* EffectDeviceResources::DemandCreateRootSig(
+    _Inout_ ComPtr<ID3D12RootSignature>& rootSig,
+    D3D12_ROOT_SIGNATURE_DESC const& desc)
 {
-    return DemandCreate(vertexShader, mMutex, [&](ID3D11VertexShader** pResult) -> HRESULT
+    return DemandCreate(rootSig, mMutex, [&](ID3D12RootSignature** pResult) noexcept -> HRESULT
         {
-            HRESULT hr = mDevice->CreateVertexShader(bytecode.code, bytecode.length, nullptr, pResult);
+            HRESULT hr = CreateRootSignature(mDevice.Get(), &desc, pResult);
 
             if (SUCCEEDED(hr))
-                SetDebugObjectName(*pResult, "DirectXTK:Effect");
+                SetDebugObjectName(*pResult, L"DirectXTK:Effect");
 
             return hr;
         });
-}
-
-
-// Gets or lazily creates the specified pixel shader permutation.
-ID3D11PixelShader* EffectDeviceResources::DemandCreatePixelShader(_Inout_ ComPtr<ID3D11PixelShader>& pixelShader, ShaderBytecode const& bytecode)
-{
-    return DemandCreate(pixelShader, mMutex, [&](ID3D11PixelShader** pResult) -> HRESULT
-        {
-            HRESULT hr = mDevice->CreatePixelShader(bytecode.code, bytecode.length, nullptr, pResult);
-
-            if (SUCCEEDED(hr))
-                SetDebugObjectName(*pResult, "DirectXTK:Effect");
-
-            return hr;
-        });
-}
-
-
-// Gets or lazily creates the default texture
-ID3D11ShaderResourceView* EffectDeviceResources::GetDefaultTexture()
-{
-    return DemandCreate(mDefaultTexture, mMutex, [&](ID3D11ShaderResourceView** pResult) -> HRESULT
-        {
-            static const uint32_t s_pixel = 0xffffffff;
-
-            D3D11_SUBRESOURCE_DATA initData = { &s_pixel, sizeof(uint32_t), 0 };
-
-            D3D11_TEXTURE2D_DESC desc = {};
-            desc.Width = desc.Height = desc.MipLevels = desc.ArraySize = 1;
-            desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-            desc.SampleDesc.Count = 1;
-            desc.Usage = D3D11_USAGE_IMMUTABLE;
-            desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-
-            ComPtr<ID3D11Texture2D> tex;
-            HRESULT hr = mDevice->CreateTexture2D(&desc, &initData, tex.GetAddressOf());
-
-            if (SUCCEEDED(hr))
-            {
-                SetDebugObjectName(tex.Get(), "DirectXTK:Effect");
-
-                D3D11_SHADER_RESOURCE_VIEW_DESC SRVDesc = {};
-                SRVDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-                SRVDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-                SRVDesc.Texture2D.MipLevels = 1;
-
-                hr = mDevice->CreateShaderResourceView(tex.Get(), &SRVDesc, pResult);
-                if (SUCCEEDED(hr))
-                    SetDebugObjectName(*pResult, "DirectXTK:Effect");
-            }
-
-            return hr;
-        });
-}
-
-ID3D11ShaderResourceView* EffectDeviceResources::GetDefaultNormalTexture()
-{
-    return DemandCreate(mDefaultNormalTexture, mMutex, [&](ID3D11ShaderResourceView** pResult) -> HRESULT
-        {
-            static const uint16_t s_pixel = 0x7f7f;
-
-            D3D11_SUBRESOURCE_DATA initData = { &s_pixel, sizeof(uint16_t), 0 };
-
-            D3D11_TEXTURE2D_DESC desc = {};
-            desc.Width = desc.Height = desc.MipLevels = desc.ArraySize = 1;
-            desc.Format = DXGI_FORMAT_R8G8_UNORM;
-            desc.SampleDesc.Count = 1;
-            desc.Usage = D3D11_USAGE_IMMUTABLE;
-            desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-
-            ComPtr<ID3D11Texture2D> tex;
-            HRESULT hr = mDevice->CreateTexture2D(&desc, &initData, tex.GetAddressOf());
-
-            if (SUCCEEDED(hr))
-            {
-                SetDebugObjectName(tex.Get(), "DirectXTK:Effect");
-
-                D3D11_SHADER_RESOURCE_VIEW_DESC SRVDesc = {};
-                SRVDesc.Format = DXGI_FORMAT_R8G8_UNORM;
-                SRVDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-                SRVDesc.Texture2D.MipLevels = 1;
-
-                hr = mDevice->CreateShaderResourceView(tex.Get(), &SRVDesc, pResult);
-                if (SUCCEEDED(hr))
-                    SetDebugObjectName(*pResult, "DirectXTK:Effect");
-            }
-
-            return hr;
-        });
-}
-
-// Gets device feature level
-D3D_FEATURE_LEVEL EffectDeviceResources::GetDeviceFeatureLevel() const
-{
-    return mDevice->GetFeatureLevel();
 }

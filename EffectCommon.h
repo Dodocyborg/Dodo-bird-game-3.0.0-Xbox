@@ -4,7 +4,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 //
-// http://go.microsoft.com/fwlink/?LinkId=248929
+// http://go.microsoft.com/fwlink/?LinkID=615561
 //--------------------------------------------------------------------------------------
 
 #pragma once
@@ -12,12 +12,13 @@
 #include <memory>
 
 #include "Effects.h"
-#include "AlignedNew.h"
-#include "BufferHelpers.h"
-#include "DirectXHelpers.h"
 #include "PlatformHelpers.h"
 #include "SharedResourcePool.h"
-
+#include "AlignedNew.h"
+#include "DescriptorHeap.h"
+#include "GraphicsMemory.h"
+#include "DirectXHelpers.h"
+#include "RenderTargetState.h"
 
 // BasicEffect, SkinnedEffect, et al, have many things in common, but also significant
 // differences (for instance, not all the effects support lighting). This header breaks
@@ -27,6 +28,17 @@
 
 namespace DirectX
 {
+    inline namespace DX12
+    {
+        // Internal effect flags
+        namespace EffectFlags
+        {
+            constexpr int PerPixelLightingBit = 0x04;
+        }
+
+        static_assert(((EffectFlags::PerPixelLighting)& EffectFlags::PerPixelLightingBit) != 0, "PerPixelLighting enum flags mismatch");
+    }
+
     // Bitfield tracks which derived parameter values need to be recomputed.
     namespace EffectDirtyFlags
     {
@@ -39,7 +51,6 @@ namespace DirectX
         constexpr int FogEnable = 0x40;
         constexpr int AlphaTest = 0x80;
     }
-
 
     // Helper stores matrix parameter values, and computes derived matrices.
     struct EffectMatrices
@@ -109,198 +120,120 @@ namespace DirectX
         static void EnableDefaultLighting(_In_ IEffectLights* effect);
     };
 
-
-    // Points to a precompiled vertex or pixel shader program.
-    struct ShaderBytecode
-    {
-        void const* code;
-        size_t length;
-    };
-
-
-    // Factory for lazily instantiating shaders. BasicEffect supports many different
-    // shader permutations, so we only bother creating the ones that are actually used.
+    // Factory for lazily instantiating shared root signatures.
     class EffectDeviceResources
     {
     public:
-        EffectDeviceResources(_In_ ID3D11Device* device) noexcept
+        EffectDeviceResources(_In_ ID3D12Device* device) noexcept
             : mDevice(device)
         {
         }
 
-        ID3D11VertexShader* DemandCreateVertexShader(_Inout_ Microsoft::WRL::ComPtr<ID3D11VertexShader>& vertexShader, ShaderBytecode const& bytecode);
-        ID3D11PixelShader * DemandCreatePixelShader(_Inout_ Microsoft::WRL::ComPtr<ID3D11PixelShader> & pixelShader, ShaderBytecode const& bytecode);
-        ID3D11ShaderResourceView* GetDefaultTexture();
-        ID3D11ShaderResourceView* GetDefaultNormalTexture();
-        D3D_FEATURE_LEVEL GetDeviceFeatureLevel() const;
+        ID3D12RootSignature* DemandCreateRootSig(_Inout_ Microsoft::WRL::ComPtr<ID3D12RootSignature>& rootSig, D3D12_ROOT_SIGNATURE_DESC const& desc);
 
     protected:
-        Microsoft::WRL::ComPtr<ID3D11Device> mDevice;
-        Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> mDefaultTexture;
-        Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> mDefaultNormalTexture;
+        Microsoft::WRL::ComPtr<ID3D12Device> mDevice;
 
         std::mutex mMutex;
     };
-
 
     // Templated base class provides functionality common to all the built-in effects.
     template<typename Traits>
     class EffectBase : public AlignedNew<typename Traits::ConstantBufferType>
     {
     public:
-        // Constructor.
-        EffectBase(_In_ ID3D11Device* device)
-            : constants{},
-            dirtyFlags(INT_MAX),
-            mConstantBuffer(device),
-            mDeviceResources(deviceResourcesPool.DemandCreate(device))
-        {
-            SetDebugObjectName(mConstantBuffer.GetBuffer(), "Effect");
-        }
-
-        EffectBase(EffectBase&&) = default;
-        EffectBase& operator= (EffectBase&&) = default;
-
-        EffectBase(EffectBase const&) = delete;
-        EffectBase& operator= (EffectBase const&) = delete;
-
-        // Fields.
         typename Traits::ConstantBufferType constants;
 
-        EffectMatrices matrices;
-        EffectFog fog;
-
-        Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> texture;
-
-        int dirtyFlags;
-
-
-        // Helper looks up the bytecode for the specified vertex shader permutation.
-        // Client code needs this in order to create matching input layouts.
-        void GetVertexShaderBytecode(int permutation, _Out_ void const** pShaderByteCode, _Out_ size_t* pByteCodeLength) noexcept
+       // Constructor.
+        EffectBase(_In_ ID3D12Device* device)
+            : constants{},
+            dirtyFlags(INT_MAX),
+            mRootSignature(nullptr),
+            mDeviceResources(deviceResourcesPool.DemandCreate(device))
         {
-            assert(pShaderByteCode != nullptr && pByteCodeLength != nullptr);
-            assert(permutation >= 0 && permutation < Traits::ShaderPermutationCount);
-            _Analysis_assume_(permutation >= 0 && permutation < Traits::ShaderPermutationCount);
-            const int shaderIndex = VertexShaderIndices[permutation];
-            assert(shaderIndex >= 0 && shaderIndex < Traits::VertexShaderCount);
-            _Analysis_assume_(shaderIndex >= 0 && shaderIndex < Traits::VertexShaderCount);
-
-            ShaderBytecode const& bytecode = VertexShaderBytecode[shaderIndex];
-
-            *pShaderByteCode = bytecode.code;
-            *pByteCodeLength = bytecode.length;
+            // Initialize the constant buffer data
+            mConstantBuffer = GraphicsMemory::Get(device).AllocateConstant(constants);
         }
 
-
-        // Helper sets our shaders and constant buffers onto the D3D device.
-        void ApplyShaders(_In_ ID3D11DeviceContext* deviceContext, int permutation)
+        // Commits constants to the constant buffer memory
+        void UpdateConstants()
         {
-            // Set shaders.
-            auto vertexShader = mDeviceResources->GetVertexShader(permutation);
-            auto pixelShader = mDeviceResources->GetPixelShader(permutation);
-
-            deviceContext->VSSetShader(vertexShader, nullptr, 0);
-            deviceContext->PSSetShader(pixelShader, nullptr, 0);
-
-        #if defined(_XBOX_ONE) && defined(_TITLE)
-            void *grfxMemory;
-            mConstantBuffer.SetData(deviceContext, constants, &grfxMemory);
-
-            Microsoft::WRL::ComPtr<ID3D11DeviceContextX> deviceContextX;
-            ThrowIfFailed(deviceContext->QueryInterface(IID_GRAPHICS_PPV_ARGS(deviceContextX.GetAddressOf())));
-
-            auto buffer = mConstantBuffer.GetBuffer();
-
-            deviceContextX->VSSetPlacementConstantBuffer(0, buffer, grfxMemory);
-            deviceContextX->PSSetPlacementConstantBuffer(0, buffer, grfxMemory);
-        #else
-                    // Make sure the constant buffer is up to date.
+            // Make sure the constant buffer is up to date.
             if (dirtyFlags & EffectDirtyFlags::ConstantBuffer)
             {
-                mConstantBuffer.SetData(deviceContext, constants);
+                mConstantBuffer = GraphicsMemory::Get(mDeviceResources->GetDevice()).AllocateConstant(constants);
 
                 dirtyFlags &= ~EffectDirtyFlags::ConstantBuffer;
             }
-
-            // Set the constant buffer.
-            ID3D11Buffer* buffer = mConstantBuffer.GetBuffer();
-
-            deviceContext->VSSetConstantBuffers(0, 1, &buffer);
-            deviceContext->PSSetConstantBuffers(0, 1, &buffer);
-        #endif
         }
 
+        D3D12_GPU_VIRTUAL_ADDRESS GetConstantBufferGpuAddress() noexcept
+        {
+            return mConstantBuffer.GpuAddress();
+        }
 
-        // Helpers
-        ID3D11ShaderResourceView* GetDefaultTexture() { return mDeviceResources->GetDefaultTexture(); }
-        ID3D11ShaderResourceView* GetDefaultNormalTexture() { return mDeviceResources->GetDefaultNormalTexture(); }
-        D3D_FEATURE_LEVEL GetDeviceFeatureLevel() const { return mDeviceResources->GetDeviceFeatureLevel(); }
+        ID3D12RootSignature* GetRootSignature(int slot, CD3DX12_ROOT_SIGNATURE_DESC const& rootSig)
+        {
+            return mDeviceResources->GetRootSignature(slot, rootSig);
+        }
 
+        ID3D12Device* GetDevice() const noexcept
+        {
+            return mDeviceResources->GetDevice();
+        }
+
+        // Fields.
+        EffectMatrices matrices;
+        EffectFog fog;
+        int dirtyFlags;
 
     protected:
         // Static arrays hold all the precompiled shader permutations.
-        static const ShaderBytecode VertexShaderBytecode[Traits::VertexShaderCount];
-        static const ShaderBytecode PixelShaderBytecode[Traits::PixelShaderCount];
-
+        static const D3D12_SHADER_BYTECODE VertexShaderBytecode[Traits::VertexShaderCount];
+        static const D3D12_SHADER_BYTECODE PixelShaderBytecode[Traits::PixelShaderCount];
+        // .. and shader entry points
         static const int VertexShaderIndices[Traits::ShaderPermutationCount];
         static const int PixelShaderIndices[Traits::ShaderPermutationCount];
+        // ... and vertex layout tables
+        static const D3D12_INPUT_LAYOUT_DESC VertexShaderInputLayouts[Traits::ShaderPermutationCount];
+
+        // Per instance cache of PSOs, populated with variants for each shader & layout
+        Microsoft::WRL::ComPtr<ID3D12PipelineState> mPipelineState;
+
+        // Per instance root signature
+        ID3D12RootSignature* mRootSignature;
 
     private:
         // D3D constant buffer holds a copy of the same data as the public 'constants' field.
-        ConstantBuffer<typename Traits::ConstantBufferType> mConstantBuffer;
+        GraphicsResource mConstantBuffer;
 
         // Only one of these helpers is allocated per D3D device, even if there are multiple effect instances.
-        class DeviceResources : protected EffectDeviceResources
+        class DeviceResources : public EffectDeviceResources
         {
         public:
-            DeviceResources(_In_ ID3D11Device* device) noexcept
+            DeviceResources(_In_ ID3D12Device* device) noexcept
                 : EffectDeviceResources(device),
-                mVertexShaders{},
-                mPixelShaders{}
+                mRootSignature{}
             { }
 
-
-            // Gets or lazily creates the specified vertex shader permutation.
-            ID3D11VertexShader* GetVertexShader(int permutation)
+            // Gets or lazily creates the specified root signature
+            ID3D12RootSignature* GetRootSignature(int slot, D3D12_ROOT_SIGNATURE_DESC const& desc)
             {
-                assert(permutation >= 0 && permutation < Traits::ShaderPermutationCount);
-                _Analysis_assume_(permutation >= 0 && permutation < Traits::ShaderPermutationCount);
-                int shaderIndex = VertexShaderIndices[permutation];
-                assert(shaderIndex >= 0 && shaderIndex < Traits::VertexShaderCount);
-                _Analysis_assume_(shaderIndex >= 0 && shaderIndex < Traits::VertexShaderCount);
+                assert(slot >= 0 && slot < Traits::RootSignatureCount);
+                _Analysis_assume_(slot >= 0 && slot < Traits::RootSignatureCount);
 
-                return DemandCreateVertexShader(mVertexShaders[shaderIndex], VertexShaderBytecode[shaderIndex]);
+                return DemandCreateRootSig(mRootSignature[slot], desc);
             }
 
-
-            // Gets or lazily creates the specified pixel shader permutation.
-            ID3D11PixelShader* GetPixelShader(int permutation)
-            {
-                assert(permutation >= 0 && permutation < Traits::ShaderPermutationCount);
-                _Analysis_assume_(permutation >= 0 && permutation < Traits::ShaderPermutationCount);
-                int shaderIndex = PixelShaderIndices[permutation];
-                assert(shaderIndex >= 0 && shaderIndex < Traits::PixelShaderCount);
-                _Analysis_assume_(shaderIndex >= 0 && shaderIndex < Traits::PixelShaderCount);
-
-                return DemandCreatePixelShader(mPixelShaders[shaderIndex], PixelShaderBytecode[shaderIndex]);
-            }
-
-
-            // Helpers
-            ID3D11ShaderResourceView* GetDefaultTexture() { return EffectDeviceResources::GetDefaultTexture(); }
-            ID3D11ShaderResourceView* GetDefaultNormalTexture() { return EffectDeviceResources::GetDefaultNormalTexture(); }
-            D3D_FEATURE_LEVEL GetDeviceFeatureLevel() const { return EffectDeviceResources::GetDeviceFeatureLevel(); }
+            ID3D12Device* GetDevice() const noexcept { return mDevice.Get(); }
 
         private:
-            Microsoft::WRL::ComPtr<ID3D11VertexShader> mVertexShaders[Traits::VertexShaderCount];
-            Microsoft::WRL::ComPtr<ID3D11PixelShader> mPixelShaders[Traits::PixelShaderCount];
+            Microsoft::WRL::ComPtr<ID3D12RootSignature> mRootSignature[Traits::RootSignatureCount];
         };
-
 
         // Per-device resources.
         std::shared_ptr<DeviceResources> mDeviceResources;
 
-        static SharedResourcePool<ID3D11Device*, DeviceResources> deviceResourcesPool;
+        static SharedResourcePool<ID3D12Device*, DeviceResources> deviceResourcesPool;
     };
 }

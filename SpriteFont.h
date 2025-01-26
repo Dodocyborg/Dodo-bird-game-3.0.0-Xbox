@@ -4,7 +4,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 //
-// http://go.microsoft.com/fwlink/?LinkId=248929
+// http://go.microsoft.com/fwlink/?LinkID=615561
 //--------------------------------------------------------------------------------------
 
 #pragma once
@@ -18,16 +18,23 @@
 
 namespace DirectX
 {
-    inline namespace DX11
+    inline namespace DX12
     {
         class SpriteFont
         {
         public:
             struct Glyph;
 
-            SpriteFont(_In_ ID3D11Device* device, _In_z_ wchar_t const* fileName, bool forceSRGB = false);
-            SpriteFont(_In_ ID3D11Device* device, _In_reads_bytes_(dataSize) uint8_t const* dataBlob, _In_ size_t dataSize, bool forceSRGB = false);
-            SpriteFont(_In_ ID3D11ShaderResourceView* texture, _In_reads_(glyphCount) Glyph const* glyphs, _In_ size_t glyphCount, _In_ float lineSpacing);
+            SpriteFont(ID3D12Device* device, ResourceUploadBatch& upload,
+                _In_z_ wchar_t const* fileName,
+                D3D12_CPU_DESCRIPTOR_HANDLE cpuDescriptorDest, D3D12_GPU_DESCRIPTOR_HANDLE gpuDescriptor,
+                bool forceSRGB = false);
+            SpriteFont(ID3D12Device* device, ResourceUploadBatch& upload,
+                _In_reads_bytes_(dataSize) uint8_t const* dataBlob, size_t dataSize,
+                D3D12_CPU_DESCRIPTOR_HANDLE cpuDescriptorDest, D3D12_GPU_DESCRIPTOR_HANDLE gpuDescriptor,
+                bool forceSRGB = false);
+            SpriteFont(D3D12_GPU_DESCRIPTOR_HANDLE texture, XMUINT2 textureSize,
+                _In_reads_(glyphCount) Glyph const* glyphs, size_t glyphCount, float lineSpacing);
 
             SpriteFont(SpriteFont&&) noexcept;
             SpriteFont& operator= (SpriteFont&&) noexcept;
@@ -71,7 +78,8 @@ namespace DirectX
 
             // Custom layout/rendering
             Glyph const* __cdecl FindGlyph(wchar_t character) const;
-            void __cdecl GetSpriteSheet(ID3D11ShaderResourceView** texture) const;
+            D3D12_GPU_DESCRIPTOR_HANDLE __cdecl GetSpriteSheet() const noexcept;
+            XMUINT2 __cdecl GetSpriteSheetSize() const noexcept;
 
             // Describes a single character glyph.
             struct Glyph
@@ -84,7 +92,7 @@ namespace DirectX
             };
 
 #if defined(_MSC_VER) && !defined(_NATIVE_WCHAR_T_DEFINED)
-            SpriteFont(_In_ ID3D11Device* device, _In_z_ __wchar_t const* fileName, bool forceSRGB = false);
+            SpriteFont(ID3D12Device* device, ResourceUploadBatch& upload, _In_z_ __wchar_t const* fileName, D3D12_CPU_DESCRIPTOR_HANDLE cpuDescriptorDest, D3D12_GPU_DESCRIPTOR_HANDLE gpuDescriptor, bool forceSRGB = false);
 
             void XM_CALLCONV DrawString(_In_ SpriteBatch* spriteBatch, _In_z_ __wchar_t const* text, XMFLOAT2 const& position, FXMVECTOR color = Colors::White, float rotation = 0, XMFLOAT2 const& origin = Float2Zero, float scale = 1, SpriteEffects effects = SpriteEffects_None, float layerDepth = 0) const;
 

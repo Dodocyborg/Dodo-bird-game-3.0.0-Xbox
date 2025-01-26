@@ -1,14 +1,17 @@
-//--------------------------------------------------------------------------------------
+//------------------------------------- -------------------------------------------------
 // File: BufferHelpers.cpp
 //
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 //
-// http://go.microsoft.com/fwlink/?LinkId=248929
+// http://go.microsoft.com/fwlink/?LinkID=615561
 //--------------------------------------------------------------------------------------
 
 #include "pch.h"
 #include "BufferHelpers.h"
+#include "DirectXHelpers.h"
+#include "ResourceUploadBatch.h"
+#include "LoaderHelpers.h"
 #include "PlatformHelpers.h"
 
 
@@ -18,12 +21,14 @@ using Microsoft::WRL::ComPtr;
 //--------------------------------------------------------------------------------------
 _Use_decl_annotations_
 HRESULT DirectX::CreateStaticBuffer(
-    ID3D11Device* device,
+    ID3D12Device* device,
+    ResourceUploadBatch& resourceUpload,
     const void* ptr,
     size_t count,
     size_t stride,
-    unsigned int bindFlags,
-    ID3D11Buffer** pBuffer) noexcept
+    D3D12_RESOURCE_STATES afterState,
+    ID3D12Resource** pBuffer,
+    D3D12_RESOURCE_FLAGS resFlags) noexcept
 {
     if (!pBuffer)
         return E_INVALIDARG;
@@ -35,359 +40,367 @@ HRESULT DirectX::CreateStaticBuffer(
 
     const uint64_t sizeInbytes = uint64_t(count) * uint64_t(stride);
 
-    static constexpr uint64_t c_maxBytes = D3D11_REQ_RESOURCE_SIZE_IN_MEGABYTES_EXPRESSION_A_TERM * 1024u * 1024u;
-    static_assert(c_maxBytes <= UINT32_MAX, "Exceeded integer limits");
+    static constexpr uint64_t c_maxBytes = D3D12_REQ_RESOURCE_SIZE_IN_MEGABYTES_EXPRESSION_A_TERM * 1024u * 1024u;
 
     if (sizeInbytes > c_maxBytes)
     {
-        DebugTrace("ERROR: Resource size too large for DirectX 11 (size %llu)\n", sizeInbytes);
+        DebugTrace("ERROR: Resource size too large for DirectX 12 (size %llu)\n", sizeInbytes);
         return HRESULT_FROM_WIN32(ERROR_NOT_SUPPORTED);
     }
 
-    D3D11_BUFFER_DESC bufferDesc = {};
-    bufferDesc.ByteWidth = static_cast<UINT>(sizeInbytes);
-    bufferDesc.BindFlags = bindFlags;
-    bufferDesc.Usage = D3D11_USAGE_DEFAULT;
+    auto const desc = CD3DX12_RESOURCE_DESC::Buffer(sizeInbytes, resFlags);
 
-    D3D11_SUBRESOURCE_DATA initData = { ptr, 0, 0 };
+    const CD3DX12_HEAP_PROPERTIES heapProperties(D3D12_HEAP_TYPE_DEFAULT);
 
-    return device->CreateBuffer(&bufferDesc, &initData, pBuffer);
+    ComPtr<ID3D12Resource> res;
+    HRESULT hr = device->CreateCommittedResource(
+        &heapProperties,
+        D3D12_HEAP_FLAG_NONE,
+        &desc,
+        c_initialCopyTargetState,
+        nullptr,
+        IID_GRAPHICS_PPV_ARGS(res.GetAddressOf()));
+    if (FAILED(hr))
+        return hr;
+
+    D3D12_SUBRESOURCE_DATA initData = { ptr, 0, 0 };
+
+    try
+    {
+        resourceUpload.Upload(res.Get(), 0, &initData, 1);
+
+        resourceUpload.Transition(res.Get(), D3D12_RESOURCE_STATE_COPY_DEST, afterState);
+    }
+    catch (com_exception e)
+    {
+        return e.get_result();
+    }
+    catch (...)
+    {
+        return E_FAIL;
+    }
+
+    *pBuffer = res.Detach();
+
+    return S_OK;
 }
 
 
 //--------------------------------------------------------------------------------------
 _Use_decl_annotations_
-HRESULT DirectX::CreateTextureFromMemory(
-    ID3D11Device* device,
-    size_t width,
-    DXGI_FORMAT format,
-    const D3D11_SUBRESOURCE_DATA& initData,
-    ID3D11Texture1D** texture,
-    ID3D11ShaderResourceView** textureView,
-    unsigned int bindFlags) noexcept
-{
-    if (texture)
-    {
-        *texture = nullptr;
-    }
-    if (textureView)
-    {
-        *textureView = nullptr;
-    }
-
-    if (!device || !width || !initData.pSysMem)
-        return E_INVALIDARG;
-
-    if (!texture && !textureView)
-        return E_INVALIDARG;
-
-    static_assert(D3D11_REQ_TEXTURE1D_U_DIMENSION <= UINT32_MAX, "Exceeded integer limits");
-
-    if (width > D3D11_REQ_TEXTURE1D_U_DIMENSION)
-    {
-        DebugTrace("ERROR: Resource dimensions too large for DirectX 11 (1D: size %zu)\n", width);
-        return HRESULT_FROM_WIN32(ERROR_NOT_SUPPORTED);
-    }
-
-    D3D11_TEXTURE1D_DESC desc = {};
-    desc.Width = static_cast<UINT>(width);
-    desc.MipLevels = desc.ArraySize = 1;
-    desc.Format = format;
-    desc.Usage = D3D11_USAGE_DEFAULT;
-    desc.BindFlags = bindFlags;
-
-    ComPtr<ID3D11Texture1D> tex;
-    HRESULT hr = device->CreateTexture1D(&desc, &initData, tex.GetAddressOf());
-    if (SUCCEEDED(hr))
-    {
-        if (textureView)
-        {
-            hr = device->CreateShaderResourceView(tex.Get(), nullptr, textureView);
-            if (FAILED(hr))
-                return hr;
-        }
-
-        if (texture)
-        {
-            *texture = tex.Detach();
-        }
-    }
-
-    return hr;
-}
-
-_Use_decl_annotations_
-HRESULT DirectX::CreateTextureFromMemory(
-    ID3D11Device* device,
-    size_t width,
-    size_t height,
-    DXGI_FORMAT format,
-    const D3D11_SUBRESOURCE_DATA& initData,
-    ID3D11Texture2D** texture,
-    ID3D11ShaderResourceView** textureView,
-    unsigned int bindFlags) noexcept
-{
-    if (texture)
-    {
-        *texture = nullptr;
-    }
-    if (textureView)
-    {
-        *textureView = nullptr;
-    }
-
-    if (!device || !width || !height
-        || !initData.pSysMem || !initData.SysMemPitch)
-        return E_INVALIDARG;
-
-    if (!texture && !textureView)
-        return E_INVALIDARG;
-
-    static_assert(D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION <= UINT32_MAX, "Exceeded integer limits");
-
-    if ((width > D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION)
-        || (height > D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION))
-    {
-        DebugTrace("ERROR: Resource dimensions too large for DirectX 11 (2D: size %zu by %zu)\n", width, height);
-        return HRESULT_FROM_WIN32(ERROR_NOT_SUPPORTED);
-    }
-
-    D3D11_TEXTURE2D_DESC desc = {};
-    desc.Width = static_cast<UINT>(width);
-    desc.Height = static_cast<UINT>(height);
-    desc.MipLevels = desc.ArraySize = 1;
-    desc.Format = format;
-    desc.SampleDesc.Count = 1;
-    desc.Usage = D3D11_USAGE_DEFAULT;
-    desc.BindFlags = bindFlags;
-
-    ComPtr<ID3D11Texture2D> tex;
-    HRESULT hr = device->CreateTexture2D(&desc, &initData, tex.GetAddressOf());
-    if (SUCCEEDED(hr))
-    {
-        if (textureView)
-        {
-            hr = device->CreateShaderResourceView(tex.Get(), nullptr, textureView);
-            if (FAILED(hr))
-                return hr;
-        }
-
-        if (texture)
-        {
-            *texture = tex.Detach();
-        }
-    }
-
-    return hr;
-}
-
-
-_Use_decl_annotations_
-HRESULT DirectX::CreateTextureFromMemory(
-#if defined(_XBOX_ONE) && defined(_TITLE)
-    _In_ ID3D11DeviceX* device,
-    _In_ ID3D11DeviceContextX* d3dContext,
-#else
-    _In_ ID3D11Device* device,
-    _In_ ID3D11DeviceContext* d3dContext,
-#endif
-    size_t width,
-    size_t height,
-    DXGI_FORMAT format,
-    const D3D11_SUBRESOURCE_DATA& initData,
-    ID3D11Texture2D** texture,
-    ID3D11ShaderResourceView** textureView) noexcept
-{
-    if (texture)
-    {
-        *texture = nullptr;
-    }
-    if (textureView)
-    {
-        *textureView = nullptr;
-    }
-
-    if (!device || !d3dContext || !width || !height
-        || !initData.pSysMem || !initData.SysMemPitch)
-        return E_INVALIDARG;
-
-    if (!texture && !textureView)
-        return E_INVALIDARG;
-
-    static_assert(D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION <= UINT32_MAX, "Exceeded integer limits");
-
-    if ((width > D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION)
-        || (height > D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION))
-    {
-        DebugTrace("ERROR: Resource dimensions too large for DirectX 11 (2D: size %zu by %zu)\n", width, height);
-        return HRESULT_FROM_WIN32(ERROR_NOT_SUPPORTED);
-    }
-
-    D3D11_TEXTURE2D_DESC desc = {};
-    desc.Width = static_cast<UINT>(width);
-    desc.Height = static_cast<UINT>(height);
-    desc.ArraySize = 1;
-    desc.Format = format;
-    desc.SampleDesc.Count = 1;
-    desc.Usage = D3D11_USAGE_DEFAULT;
-    desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-
-    UINT fmtSupport = 0;
-    if (SUCCEEDED(device->CheckFormatSupport(format, &fmtSupport)) && (fmtSupport & D3D11_FORMAT_SUPPORT_MIP_AUTOGEN))
-    {
-        desc.BindFlags |= D3D11_BIND_RENDER_TARGET;
-        desc.MiscFlags |= D3D11_RESOURCE_MISC_GENERATE_MIPS;
-    }
-    else
-    {
-        // Autogen not supported.
-        desc.MipLevels = 1;
-    }
-
-    ComPtr<ID3D11Texture2D> tex;
-    HRESULT hr = device->CreateTexture2D(&desc, nullptr, tex.GetAddressOf());
-    if (SUCCEEDED(hr))
-    {
-        ComPtr<ID3D11ShaderResourceView> srv;
-        hr = device->CreateShaderResourceView(tex.Get(), nullptr, srv.GetAddressOf());
-        if (FAILED(hr))
-            return hr;
-
-        if (desc.MipLevels != 1)
-        {
-        #if defined(_XBOX_ONE) && defined(_TITLE)
-            ComPtr<ID3D11Texture2D> staging;
-            desc.MipLevels = 1;
-            desc.Usage = D3D11_USAGE_STAGING;
-            desc.BindFlags = desc.MiscFlags = 0;
-            desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
-            hr = device->CreateTexture2D(&desc, &initData, staging.GetAddressOf());
-            if (FAILED(hr))
-                return hr;
-
-            d3dContext->CopySubresourceRegion(tex.Get(), 0, 0, 0, 0, staging.Get(), 0, nullptr);
-            UINT64 copyFence = d3dContext->InsertFence(0);
-            while (device->IsFencePending(copyFence)) { SwitchToThread(); }
-        #else
-            d3dContext->UpdateSubresource(tex.Get(), 0, nullptr, initData.pSysMem, initData.SysMemPitch, 0);
-        #endif
-            d3dContext->GenerateMips(srv.Get());
-        }
-
-        if (texture)
-        {
-            *texture = tex.Detach();
-        }
-        if (textureView)
-        {
-            *textureView = srv.Detach();
-        }
-    }
-
-    return hr;
-}
-
-_Use_decl_annotations_
-HRESULT DirectX::CreateTextureFromMemory(
-    ID3D11Device* device,
-    size_t width, size_t height, size_t depth,
-    DXGI_FORMAT format,
-    const D3D11_SUBRESOURCE_DATA& initData,
-    ID3D11Texture3D** texture,
-    ID3D11ShaderResourceView** textureView,
-    unsigned int bindFlags) noexcept
-{
-    if (texture)
-    {
-        *texture = nullptr;
-    }
-    if (textureView)
-    {
-        *textureView = nullptr;
-    }
-
-    if (!device || !width || !height || !depth
-        || !initData.pSysMem || !initData.SysMemPitch || !initData.SysMemSlicePitch)
-        return E_INVALIDARG;
-
-    if (!texture && !textureView)
-        return E_INVALIDARG;
-
-    static_assert(D3D11_REQ_TEXTURE3D_U_V_OR_W_DIMENSION <= UINT32_MAX, "Exceeded integer limits");
-
-    if ((width > D3D11_REQ_TEXTURE3D_U_V_OR_W_DIMENSION)
-        || (height > D3D11_REQ_TEXTURE3D_U_V_OR_W_DIMENSION)
-        || (depth > D3D11_REQ_TEXTURE3D_U_V_OR_W_DIMENSION))
-    {
-        DebugTrace("ERROR: Resource dimensions too large for DirectX 11 (3D: size %zu by %zu by %zu)\n", width, height, depth);
-        return HRESULT_FROM_WIN32(ERROR_NOT_SUPPORTED);
-    }
-
-    D3D11_TEXTURE3D_DESC desc = {};
-    desc.Width = static_cast<UINT>(width);
-    desc.Height = static_cast<UINT>(height);
-    desc.Depth = static_cast<UINT>(depth);
-    desc.MipLevels = 1;
-    desc.Format = format;
-    desc.Usage = D3D11_USAGE_DEFAULT;
-    desc.BindFlags = bindFlags;
-
-    ComPtr<ID3D11Texture3D> tex;
-    HRESULT hr = device->CreateTexture3D(&desc, &initData, tex.GetAddressOf());
-    if (SUCCEEDED(hr))
-    {
-        if (textureView)
-        {
-            hr = device->CreateShaderResourceView(tex.Get(), nullptr, textureView);
-            if (FAILED(hr))
-                return hr;
-        }
-
-        if (texture)
-        {
-            *texture = tex.Detach();
-        }
-    }
-
-    return hr;
-}
-
-
-//--------------------------------------------------------------------------------------
-_Use_decl_annotations_
-void Private::ConstantBufferBase::CreateBuffer(
-    ID3D11Device* device,
-    size_t bytes,
-    ID3D11Buffer** pBuffer)
+HRESULT DirectX::CreateUAVBuffer(
+    ID3D12Device* device,
+    uint64_t bufferSize,
+    ID3D12Resource** pBuffer,
+    D3D12_RESOURCE_STATES initialState,
+    D3D12_RESOURCE_FLAGS additionalResFlags) noexcept
 {
     if (!pBuffer)
-        throw std::invalid_argument("ConstantBuffer needs valid buffer parameter");
+        return E_INVALIDARG;
 
     *pBuffer = nullptr;
 
-    D3D11_BUFFER_DESC desc = {};
-    desc.ByteWidth = static_cast<UINT>(bytes);
-    desc.Usage = D3D11_USAGE_DEFAULT;
-    desc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-    desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+    if (!device || !bufferSize)
+        return E_INVALIDARG;
 
-#if defined(_XBOX_ONE) && defined(_TITLE)
+    static constexpr uint64_t c_maxBytes = D3D12_REQ_RESOURCE_SIZE_IN_MEGABYTES_EXPRESSION_A_TERM * 1024u * 1024u;
 
-    ComPtr<ID3D11DeviceX> deviceX;
-    ThrowIfFailed(device->QueryInterface(IID_GRAPHICS_PPV_ARGS(deviceX.GetAddressOf())));
+    if (bufferSize > c_maxBytes)
+    {
+        DebugTrace("ERROR: Resource size too large for DirectX 12 (size %llu)\n", bufferSize);
+        return HRESULT_FROM_WIN32(ERROR_NOT_SUPPORTED);
+    }
 
-    ThrowIfFailed(deviceX->CreatePlacementBuffer(&desc, nullptr, pBuffer));
+    auto const desc = CD3DX12_RESOURCE_DESC::Buffer(bufferSize, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS | additionalResFlags);
 
-#else
+    const CD3DX12_HEAP_PROPERTIES heapProperties(D3D12_HEAP_TYPE_DEFAULT);
 
-    desc.Usage = D3D11_USAGE_DYNAMIC;
+    ComPtr<ID3D12Resource> res;
+    HRESULT hr = device->CreateCommittedResource(
+        &heapProperties,
+        D3D12_HEAP_FLAG_NONE,
+        &desc,
+        initialState,
+        nullptr,
+        IID_GRAPHICS_PPV_ARGS(res.GetAddressOf()));
+    if (FAILED(hr))
+        return hr;
 
-    ThrowIfFailed(
-        device->CreateBuffer(&desc, nullptr, pBuffer)
-    );
+    *pBuffer = res.Detach();
 
-#endif
+    return S_OK;
+}
 
-    assert(pBuffer != nullptr && *pBuffer != nullptr);
-    _Analysis_assume_(pBuffer != nullptr && *pBuffer != nullptr);
+
+//--------------------------------------------------------------------------------------
+_Use_decl_annotations_
+HRESULT DirectX::CreateUploadBuffer(
+    ID3D12Device* device,
+    const void* ptr,
+    size_t count,
+    size_t stride,
+    ID3D12Resource** pBuffer,
+    D3D12_RESOURCE_FLAGS resFlags) noexcept
+{
+    if (!pBuffer)
+        return E_INVALIDARG;
+
+    *pBuffer = nullptr;
+
+    if (!device || !count || !stride)
+        return E_INVALIDARG;
+
+    const uint64_t sizeInbytes = uint64_t(count) * uint64_t(stride);
+
+    static constexpr uint64_t c_maxBytes = D3D12_REQ_RESOURCE_SIZE_IN_MEGABYTES_EXPRESSION_A_TERM * 1024u * 1024u;
+
+    if (sizeInbytes > c_maxBytes)
+    {
+        DebugTrace("ERROR: Resource size too large for DirectX 12 (size %llu)\n", sizeInbytes);
+        return HRESULT_FROM_WIN32(ERROR_NOT_SUPPORTED);
+    }
+
+    auto const desc = CD3DX12_RESOURCE_DESC::Buffer(sizeInbytes, resFlags);
+
+    const CD3DX12_HEAP_PROPERTIES heapProperties(D3D12_HEAP_TYPE_UPLOAD);
+
+    ComPtr<ID3D12Resource> res;
+    HRESULT hr = device->CreateCommittedResource(
+        &heapProperties,
+        D3D12_HEAP_FLAG_NONE,
+        &desc,
+        D3D12_RESOURCE_STATE_GENERIC_READ,
+        nullptr,
+        IID_GRAPHICS_PPV_ARGS(res.GetAddressOf()));
+    if (FAILED(hr))
+        return hr;
+
+    if (ptr)
+    {
+        void* mappedPtr = nullptr;
+        hr = res->Map(0, nullptr, &mappedPtr);
+        if (FAILED(hr))
+            return hr;
+
+        memcpy(mappedPtr, ptr, static_cast<const size_t>(sizeInbytes));
+        res->Unmap(0, nullptr);
+    }
+
+    *pBuffer = res.Detach();
+
+    return S_OK;
+}
+
+
+//--------------------------------------------------------------------------------------
+_Use_decl_annotations_
+HRESULT DirectX::CreateTextureFromMemory(
+    ID3D12Device* device,
+    ResourceUploadBatch& resourceUpload,
+    size_t width,
+    DXGI_FORMAT format,
+    const D3D12_SUBRESOURCE_DATA& initData,
+    ID3D12Resource** texture,
+    D3D12_RESOURCE_STATES afterState,
+    D3D12_RESOURCE_FLAGS resFlags) noexcept
+{
+    if (!texture)
+        return E_INVALIDARG;
+
+    *texture = nullptr;
+
+    if (!device || !width || !initData.pData)
+        return E_INVALIDARG;
+
+    static_assert(D3D12_REQ_TEXTURE1D_U_DIMENSION <= UINT64_MAX, "Exceeded integer limits");
+
+    if (width > D3D12_REQ_TEXTURE1D_U_DIMENSION)
+    {
+        DebugTrace("ERROR: Resource dimensions too large for DirectX 12 (1D: size %zu)\n", width);
+        return HRESULT_FROM_WIN32(ERROR_NOT_SUPPORTED);
+    }
+
+    auto const desc = CD3DX12_RESOURCE_DESC::Tex1D(format, static_cast<UINT64>(width), 1u, 1u, resFlags);
+
+    const CD3DX12_HEAP_PROPERTIES heapProperties(D3D12_HEAP_TYPE_DEFAULT);
+
+    ComPtr<ID3D12Resource> res;
+    HRESULT hr = device->CreateCommittedResource(
+        &heapProperties,
+        D3D12_HEAP_FLAG_NONE,
+        &desc,
+        c_initialCopyTargetState,
+        nullptr,
+        IID_GRAPHICS_PPV_ARGS(res.GetAddressOf()));
+    if (FAILED(hr))
+        return hr;
+
+    try
+    {
+        resourceUpload.Upload(res.Get(), 0, &initData, 1);
+
+        resourceUpload.Transition(res.Get(), D3D12_RESOURCE_STATE_COPY_DEST, afterState);
+    }
+    catch (com_exception e)
+    {
+        return e.get_result();
+    }
+    catch (...)
+    {
+        return E_FAIL;
+    }
+
+    *texture = res.Detach();
+
+    return S_OK;
+}
+
+_Use_decl_annotations_
+HRESULT DirectX::CreateTextureFromMemory(
+    ID3D12Device* device,
+    ResourceUploadBatch& resourceUpload,
+    size_t width,
+    size_t height,
+    DXGI_FORMAT format,
+    const D3D12_SUBRESOURCE_DATA& initData,
+    ID3D12Resource** texture,
+    bool generateMips,
+    D3D12_RESOURCE_STATES afterState,
+    D3D12_RESOURCE_FLAGS resFlags) noexcept
+{
+    if (!texture)
+        return E_INVALIDARG;
+
+    *texture = nullptr;
+
+    if (!device || !width || !height
+        || !initData.pData || !initData.RowPitch)
+        return E_INVALIDARG;
+
+    static_assert(D3D12_REQ_TEXTURE2D_U_OR_V_DIMENSION <= UINT32_MAX, "Exceeded integer limits");
+
+    if ((width > D3D12_REQ_TEXTURE2D_U_OR_V_DIMENSION)
+        || (height > D3D12_REQ_TEXTURE2D_U_OR_V_DIMENSION))
+    {
+        DebugTrace("ERROR: Resource dimensions too large for DirectX 12 (2D: size %zu by %zu)\n", width, height);
+        return HRESULT_FROM_WIN32(ERROR_NOT_SUPPORTED);
+    }
+
+    uint16_t mipCount = 1;
+    if (generateMips)
+    {
+        generateMips = resourceUpload.IsSupportedForGenerateMips(format);
+        if (generateMips)
+        {
+            mipCount = static_cast<uint16_t>(LoaderHelpers::CountMips(static_cast<uint32_t>(width), static_cast<uint32_t>(height)));
+        }
+    }
+
+    auto const desc = CD3DX12_RESOURCE_DESC::Tex2D(format, static_cast<UINT64>(width), static_cast<UINT>(height),
+        1u, mipCount, 1u, 0u, resFlags);
+
+    const CD3DX12_HEAP_PROPERTIES heapProperties(D3D12_HEAP_TYPE_DEFAULT);
+
+    ComPtr<ID3D12Resource> res;
+    HRESULT hr = device->CreateCommittedResource(
+        &heapProperties,
+        D3D12_HEAP_FLAG_NONE,
+        &desc,
+        c_initialCopyTargetState,
+        nullptr,
+        IID_GRAPHICS_PPV_ARGS(res.GetAddressOf()));
+    if (FAILED(hr))
+        return hr;
+
+    try
+    {
+        resourceUpload.Upload(res.Get(), 0, &initData, 1);
+
+        resourceUpload.Transition(res.Get(), D3D12_RESOURCE_STATE_COPY_DEST, afterState);
+
+        if (generateMips)
+        {
+            resourceUpload.GenerateMips(res.Get());
+        }
+    }
+    catch (com_exception e)
+    {
+        return e.get_result();
+    }
+    catch (...)
+    {
+        return E_FAIL;
+    }
+
+    *texture = res.Detach();
+
+    return S_OK;
+}
+
+
+_Use_decl_annotations_
+HRESULT DirectX::CreateTextureFromMemory(
+    ID3D12Device* device,
+    ResourceUploadBatch& resourceUpload,
+    size_t width, size_t height, size_t depth,
+    DXGI_FORMAT format,
+    const D3D12_SUBRESOURCE_DATA& initData,
+    ID3D12Resource** texture,
+    D3D12_RESOURCE_STATES afterState,
+    D3D12_RESOURCE_FLAGS resFlags) noexcept
+{
+    if (!texture)
+        return E_INVALIDARG;
+
+    *texture = nullptr;
+
+    if (!device || !width || !height || !depth
+        || !initData.pData || !initData.RowPitch || !initData.SlicePitch)
+        return E_INVALIDARG;
+
+    static_assert(D3D12_REQ_TEXTURE3D_U_V_OR_W_DIMENSION <= UINT16_MAX, "Exceeded integer limits");
+
+    if ((width > D3D12_REQ_TEXTURE3D_U_V_OR_W_DIMENSION)
+        || (height > D3D12_REQ_TEXTURE3D_U_V_OR_W_DIMENSION)
+        || (depth > D3D12_REQ_TEXTURE3D_U_V_OR_W_DIMENSION))
+    {
+        DebugTrace("ERROR: Resource dimensions too large for DirectX 12 (3D: size %zu by %zu by %zu)\n", width, height, depth);
+        return HRESULT_FROM_WIN32(ERROR_NOT_SUPPORTED);
+    }
+
+    auto const desc = CD3DX12_RESOURCE_DESC::Tex3D(format,
+        static_cast<UINT64>(width), static_cast<UINT>(height), static_cast<UINT16>(depth),
+        1u, resFlags);
+
+    const CD3DX12_HEAP_PROPERTIES heapProperties(D3D12_HEAP_TYPE_DEFAULT);
+
+    ComPtr<ID3D12Resource> res;
+    HRESULT hr = device->CreateCommittedResource(
+        &heapProperties,
+        D3D12_HEAP_FLAG_NONE,
+        &desc,
+        c_initialCopyTargetState,
+        nullptr,
+        IID_GRAPHICS_PPV_ARGS(res.GetAddressOf()));
+    if (FAILED(hr))
+        return hr;
+
+    try
+    {
+        resourceUpload.Upload(res.Get(), 0, &initData, 1);
+
+        resourceUpload.Transition(res.Get(), D3D12_RESOURCE_STATE_COPY_DEST, afterState);
+    }
+    catch (com_exception e)
+    {
+        return e.get_result();
+    }
+    catch (...)
+    {
+        return E_FAIL;
+    }
+
+    *texture = res.Detach();
+
+    return S_OK;
 }

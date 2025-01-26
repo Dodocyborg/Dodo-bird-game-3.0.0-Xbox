@@ -4,7 +4,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 //
-// http://go.microsoft.com/fwlink/?LinkId=248929
+// http://go.microsoft.com/fwlink/?LinkID=615561
 //--------------------------------------------------------------------------------------
 
 #pragma once
@@ -12,22 +12,34 @@
 #ifndef __DIRECTXTK_EFFECTS_H__
 #define __DIRECTXTK_EFFECTS_H__
 
-#if defined(_XBOX_ONE) && defined(_TITLE)
-#include <d3d11_x.h>
+#ifdef _GAMING_XBOX_SCARLETT
+#include <d3d12_xs.h>
+#elif (defined(_XBOX_ONE) && defined(_TITLE)) || defined(_GAMING_XBOX)
+#include <d3d12_x.h>
+#elif defined(USING_DIRECTX_HEADERS)
+#include <directx/d3d12.h>
+#include <dxguids/dxguids.h>
 #else
-#include <d3d11_1.h>
+#include <d3d12.h>
 #endif
 
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <string>
 
 #include <DirectXMath.h>
+
+#include "RenderTargetState.h"
+#include "EffectPipelineStateDescription.h"
 
 
 namespace DirectX
 {
-    inline namespace DX11
+    class DescriptorHeap;
+    class ResourceUploadBatch;
+
+    inline namespace DX12
     {
         //------------------------------------------------------------------------------
         // Abstract interface representing any effect which can be applied onto a D3D device context.
@@ -39,9 +51,7 @@ namespace DirectX
             IEffect(const IEffect&) = delete;
             IEffect& operator=(const IEffect&) = delete;
 
-            virtual void __cdecl Apply(_In_ ID3D11DeviceContext* deviceContext) = 0;
-
-            virtual void __cdecl GetVertexShaderBytecode(_Out_ void const** pShaderByteCode, _Out_ size_t* pByteCodeLength) = 0;
+            virtual void __cdecl Apply(_In_ ID3D12GraphicsCommandList* commandList) = 0;
 
         protected:
             IEffect() = default;
@@ -80,8 +90,6 @@ namespace DirectX
             IEffectLights(const IEffectLights&) = delete;
             IEffectLights& operator=(const IEffectLights&) = delete;
 
-            virtual void __cdecl SetLightingEnabled(bool value) = 0;
-            virtual void __cdecl SetPerPixelLighting(bool value) = 0;
             virtual void XM_CALLCONV SetAmbientLightColor(FXMVECTOR value) = 0;
 
             virtual void __cdecl SetLightEnabled(int whichLight, bool value) = 0;
@@ -109,7 +117,6 @@ namespace DirectX
             IEffectFog(const IEffectFog&) = delete;
             IEffectFog& operator=(const IEffectFog&) = delete;
 
-            virtual void __cdecl SetFogEnabled(bool value) = 0;
             virtual void __cdecl SetFogStart(float value) = 0;
             virtual void __cdecl SetFogEnd(float value) = 0;
             virtual void XM_CALLCONV SetFogColor(FXMVECTOR value) = 0;
@@ -130,7 +137,6 @@ namespace DirectX
             IEffectSkinning(const IEffectSkinning&) = delete;
             IEffectSkinning& operator=(const IEffectSkinning&) = delete;
 
-            virtual void __cdecl SetWeightsPerVertex(int value) = 0;
             virtual void __cdecl SetBoneTransforms(_In_reads_(count) XMMATRIX const* value, size_t count) = 0;
             virtual void __cdecl ResetBoneTransforms() = 0;
 
@@ -142,12 +148,44 @@ namespace DirectX
             IEffectSkinning& operator=(IEffectSkinning&&) = default;
         };
 
+
+        //------------------------------------------------------------------------------
+        namespace EffectFlags
+        {
+            constexpr uint32_t None = 0x00;
+            constexpr uint32_t Fog = 0x01;
+            constexpr uint32_t Lighting = 0x02;
+
+            constexpr uint32_t PerPixelLighting = 0x04 | Lighting;
+            // per pixel lighting implies lighting enabled
+
+            constexpr uint32_t VertexColor = 0x08;
+            constexpr uint32_t Texture = 0x10;
+            constexpr uint32_t Instancing = 0x20;
+
+            constexpr uint32_t Specular = 0x100;
+            // enable optional specular/specularMap feature
+
+            constexpr uint32_t Emissive = 0x200;
+            // enable optional emissive/emissiveMap feature
+
+            constexpr uint32_t Fresnel = 0x400;
+            // enable optional Fresnel feature
+
+            constexpr uint32_t Velocity = 0x800;
+            // enable optional velocity feature
+
+            constexpr uint32_t BiasedVertexNormals = 0x10000;
+            // compressed vertex normals need x2 bias
+        }
+
+
         //------------------------------------------------------------------------------
         // Built-in shader supports optional texture mapping, vertex coloring, directional lighting, and fog.
         class BasicEffect : public IEffect, public IEffectMatrices, public IEffectLights, public IEffectFog
         {
         public:
-            explicit BasicEffect(_In_ ID3D11Device* device);
+            BasicEffect(_In_ ID3D12Device* device, uint32_t effectFlags, const EffectPipelineStateDescription& pipelineDescription);
 
             BasicEffect(BasicEffect&&) noexcept;
             BasicEffect& operator= (BasicEffect&&) noexcept;
@@ -158,9 +196,7 @@ namespace DirectX
             ~BasicEffect() override;
 
             // IEffect methods.
-            void __cdecl Apply(_In_ ID3D11DeviceContext* deviceContext) override;
-
-            void __cdecl GetVertexShaderBytecode(_Out_ void const** pShaderByteCode, _Out_ size_t* pByteCodeLength) override;
+            void __cdecl Apply(_In_ ID3D12GraphicsCommandList* commandList) override;
 
             // Camera settings.
             void XM_CALLCONV SetWorld(FXMMATRIX value) override;
@@ -178,8 +214,6 @@ namespace DirectX
             void XM_CALLCONV SetColorAndAlpha(FXMVECTOR value);
 
             // Light settings.
-            void __cdecl SetLightingEnabled(bool value) override;
-            void __cdecl SetPerPixelLighting(bool value) override;
             void XM_CALLCONV SetAmbientLightColor(FXMVECTOR value) override;
 
             void __cdecl SetLightEnabled(int whichLight, bool value) override;
@@ -190,20 +224,12 @@ namespace DirectX
             void __cdecl EnableDefaultLighting() override;
 
             // Fog settings.
-            void __cdecl SetFogEnabled(bool value) override;
             void __cdecl SetFogStart(float value) override;
             void __cdecl SetFogEnd(float value) override;
             void XM_CALLCONV SetFogColor(FXMVECTOR value) override;
 
-            // Vertex color setting.
-            void __cdecl SetVertexColorEnabled(bool value);
-
             // Texture setting.
-            void __cdecl SetTextureEnabled(bool value);
-            void __cdecl SetTexture(_In_opt_ ID3D11ShaderResourceView* value);
-
-            // Normal compression settings.
-            void __cdecl SetBiasedVertexNormals(bool value);
+            void __cdecl SetTexture(D3D12_GPU_DESCRIPTOR_HANDLE srvDescriptor, D3D12_GPU_DESCRIPTOR_HANDLE samplerDescriptor);
 
         private:
             // Private implementation.
@@ -213,12 +239,13 @@ namespace DirectX
         };
 
 
-
         // Built-in shader supports per-pixel alpha testing.
         class AlphaTestEffect : public IEffect, public IEffectMatrices, public IEffectFog
         {
         public:
-            explicit AlphaTestEffect(_In_ ID3D11Device* device);
+            AlphaTestEffect(_In_ ID3D12Device* device, uint32_t effectFlags,
+                const EffectPipelineStateDescription& pipelineDescription,
+                D3D12_COMPARISON_FUNC alphaFunction = D3D12_COMPARISON_FUNC_GREATER);
 
             AlphaTestEffect(AlphaTestEffect&&) noexcept;
             AlphaTestEffect& operator= (AlphaTestEffect&&) noexcept;
@@ -229,9 +256,7 @@ namespace DirectX
             ~AlphaTestEffect() override;
 
             // IEffect methods.
-            void __cdecl Apply(_In_ ID3D11DeviceContext* deviceContext) override;
-
-            void __cdecl GetVertexShaderBytecode(_Out_ void const** pShaderByteCode, _Out_ size_t* pByteCodeLength) override;
+            void __cdecl Apply(_In_ ID3D12GraphicsCommandList* commandList) override;
 
             // Camera settings.
             void XM_CALLCONV SetWorld(FXMMATRIX value) override;
@@ -245,19 +270,14 @@ namespace DirectX
             void XM_CALLCONV SetColorAndAlpha(FXMVECTOR value);
 
             // Fog settings.
-            void __cdecl SetFogEnabled(bool value) override;
             void __cdecl SetFogStart(float value) override;
             void __cdecl SetFogEnd(float value) override;
             void XM_CALLCONV SetFogColor(FXMVECTOR value) override;
 
-            // Vertex color setting.
-            void __cdecl SetVertexColorEnabled(bool value);
-
             // Texture setting.
-            void __cdecl SetTexture(_In_opt_ ID3D11ShaderResourceView* value);
+            void __cdecl SetTexture(D3D12_GPU_DESCRIPTOR_HANDLE srvDescriptor, D3D12_GPU_DESCRIPTOR_HANDLE samplerDescriptor);
 
             // Alpha test settings.
-            void __cdecl SetAlphaFunction(D3D11_COMPARISON_FUNC value);
             void __cdecl SetReferenceAlpha(int value);
 
         private:
@@ -268,12 +288,12 @@ namespace DirectX
         };
 
 
-
         // Built-in shader supports two layer multitexturing (eg. for lightmaps or detail textures).
         class DualTextureEffect : public IEffect, public IEffectMatrices, public IEffectFog
         {
         public:
-            explicit DualTextureEffect(_In_ ID3D11Device* device);
+            DualTextureEffect(_In_ ID3D12Device* device, uint32_t effectFlags,
+                const EffectPipelineStateDescription& pipelineDescription);
 
             DualTextureEffect(DualTextureEffect&&) noexcept;
             DualTextureEffect& operator= (DualTextureEffect&&) noexcept;
@@ -284,9 +304,7 @@ namespace DirectX
             ~DualTextureEffect() override;
 
             // IEffect methods.
-            void __cdecl Apply(_In_ ID3D11DeviceContext* deviceContext) override;
-
-            void __cdecl GetVertexShaderBytecode(_Out_ void const** pShaderByteCode, _Out_ size_t* pByteCodeLength) override;
+            void __cdecl Apply(_In_ ID3D12GraphicsCommandList* commandList) override;
 
             // Camera settings.
             void XM_CALLCONV SetWorld(FXMMATRIX value) override;
@@ -300,17 +318,13 @@ namespace DirectX
             void XM_CALLCONV SetColorAndAlpha(FXMVECTOR value);
 
             // Fog settings.
-            void __cdecl SetFogEnabled(bool value) override;
             void __cdecl SetFogStart(float value) override;
             void __cdecl SetFogEnd(float value) override;
             void XM_CALLCONV SetFogColor(FXMVECTOR value) override;
 
-            // Vertex color setting.
-            void __cdecl SetVertexColorEnabled(bool value);
-
             // Texture settings.
-            void __cdecl SetTexture(_In_opt_ ID3D11ShaderResourceView* value);
-            void __cdecl SetTexture2(_In_opt_ ID3D11ShaderResourceView* value);
+            void __cdecl SetTexture(D3D12_GPU_DESCRIPTOR_HANDLE srvDescriptor, D3D12_GPU_DESCRIPTOR_HANDLE samplerDescriptor);
+            void __cdecl SetTexture2(D3D12_GPU_DESCRIPTOR_HANDLE srvDescriptor, D3D12_GPU_DESCRIPTOR_HANDLE samplerDescriptor);
 
         private:
             // Private implementation.
@@ -318,7 +332,6 @@ namespace DirectX
 
             std::unique_ptr<Impl> pImpl;
         };
-
 
 
         // Built-in shader supports cubic environment mapping.
@@ -332,7 +345,9 @@ namespace DirectX
                 Mapping_DualParabola,   // Dual-parabola environment map (requires Feature Level 10.0)
             };
 
-            explicit EnvironmentMapEffect(_In_ ID3D11Device* device);
+            EnvironmentMapEffect(_In_ ID3D12Device* device, uint32_t effectFlags,
+                const EffectPipelineStateDescription& pipelineDescription,
+                Mapping mapping = Mapping_Cube);
 
             EnvironmentMapEffect(EnvironmentMapEffect&&) noexcept;
             EnvironmentMapEffect& operator= (EnvironmentMapEffect&&) noexcept;
@@ -343,9 +358,7 @@ namespace DirectX
             ~EnvironmentMapEffect() override;
 
             // IEffect methods.
-            void __cdecl Apply(_In_ ID3D11DeviceContext* deviceContext) override;
-
-            void __cdecl GetVertexShaderBytecode(_Out_ void const** pShaderByteCode, _Out_ size_t* pByteCodeLength) override;
+            void __cdecl Apply(_In_ ID3D12GraphicsCommandList* commandList) override;
 
             // Camera settings.
             void XM_CALLCONV SetWorld(FXMMATRIX value) override;
@@ -362,7 +375,6 @@ namespace DirectX
             // Light settings.
             void XM_CALLCONV SetAmbientLightColor(FXMVECTOR value) override;
 
-            void __cdecl SetPerPixelLighting(bool value) override;
             void __cdecl SetLightEnabled(int whichLight, bool value) override;
             void XM_CALLCONV SetLightDirection(int whichLight, FXMVECTOR value) override;
             void XM_CALLCONV SetLightDiffuseColor(int whichLight, FXMVECTOR value) override;
@@ -370,23 +382,18 @@ namespace DirectX
             void __cdecl EnableDefaultLighting() override;
 
             // Fog settings.
-            void __cdecl SetFogEnabled(bool value) override;
             void __cdecl SetFogStart(float value) override;
             void __cdecl SetFogEnd(float value) override;
             void XM_CALLCONV SetFogColor(FXMVECTOR value) override;
 
             // Texture setting.
-            void __cdecl SetTexture(_In_opt_ ID3D11ShaderResourceView* value);
-            void __cdecl SetEnvironmentMap(_In_opt_ ID3D11ShaderResourceView* value);
+            void __cdecl SetTexture(D3D12_GPU_DESCRIPTOR_HANDLE texture, D3D12_GPU_DESCRIPTOR_HANDLE sampler);
 
             // Environment map settings.
-            void __cdecl SetMode(Mapping mapping);
+            void __cdecl SetEnvironmentMap(D3D12_GPU_DESCRIPTOR_HANDLE texture, D3D12_GPU_DESCRIPTOR_HANDLE sampler);
             void __cdecl SetEnvironmentMapAmount(float value);
             void XM_CALLCONV SetEnvironmentMapSpecular(FXMVECTOR value);
             void __cdecl SetFresnelFactor(float value);
-
-            // Normal compression settings.
-            void __cdecl SetBiasedVertexNormals(bool value);
 
         private:
             // Private implementation.
@@ -395,17 +402,16 @@ namespace DirectX
             std::unique_ptr<Impl> pImpl;
 
             // Unsupported interface methods.
-            void __cdecl SetLightingEnabled(bool value) override;
             void XM_CALLCONV SetLightSpecularColor(int whichLight, FXMVECTOR value) override;
         };
-
 
 
         // Built-in shader supports skinned animation.
         class SkinnedEffect : public IEffect, public IEffectMatrices, public IEffectLights, public IEffectFog, public IEffectSkinning
         {
         public:
-            explicit SkinnedEffect(_In_ ID3D11Device* device);
+            SkinnedEffect(_In_ ID3D12Device* device, uint32_t effectFlags,
+                const EffectPipelineStateDescription& pipelineDescription);
 
             SkinnedEffect(SkinnedEffect&&) noexcept;
             SkinnedEffect& operator= (SkinnedEffect&&) noexcept;
@@ -416,9 +422,7 @@ namespace DirectX
             ~SkinnedEffect() override;
 
             // IEffect methods.
-            void __cdecl Apply(_In_ ID3D11DeviceContext* deviceContext) override;
-
-            void __cdecl GetVertexShaderBytecode(_Out_ void const** pShaderByteCode, _Out_ size_t* pByteCodeLength) override;
+            void __cdecl Apply(_In_ ID3D12GraphicsCommandList* commandList) override;
 
             // Camera settings.
             void XM_CALLCONV SetWorld(FXMMATRIX value) override;
@@ -436,7 +440,6 @@ namespace DirectX
             void XM_CALLCONV SetColorAndAlpha(FXMVECTOR value);
 
             // Light settings.
-            void __cdecl SetPerPixelLighting(bool value) override;
             void XM_CALLCONV SetAmbientLightColor(FXMVECTOR value) override;
 
             void __cdecl SetLightEnabled(int whichLight, bool value) override;
@@ -447,141 +450,33 @@ namespace DirectX
             void __cdecl EnableDefaultLighting() override;
 
             // Fog settings.
-            void __cdecl SetFogEnabled(bool value) override;
             void __cdecl SetFogStart(float value) override;
             void __cdecl SetFogEnd(float value) override;
             void XM_CALLCONV SetFogColor(FXMVECTOR value) override;
 
             // Texture setting.
-            void __cdecl SetTexture(_In_opt_ ID3D11ShaderResourceView* value);
+            void __cdecl SetTexture(D3D12_GPU_DESCRIPTOR_HANDLE srvDescriptor, D3D12_GPU_DESCRIPTOR_HANDLE samplerDescriptor);
 
             // Animation settings.
-            void __cdecl SetWeightsPerVertex(int value) override;
             void __cdecl SetBoneTransforms(_In_reads_(count) XMMATRIX const* value, size_t count) override;
             void __cdecl ResetBoneTransforms() override;
-
-            // Normal compression settings.
-            void __cdecl SetBiasedVertexNormals(bool value);
 
         private:
             // Private implementation.
             class Impl;
 
             std::unique_ptr<Impl> pImpl;
-
-            // Unsupported interface method.
-            void __cdecl SetLightingEnabled(bool value) override;
         };
+
 
         //------------------------------------------------------------------------------
-        // Built-in effect for Visual Studio Shader Designer (DGSL) shaders
-        class DGSLEffect : public IEffect, public IEffectMatrices, public IEffectLights
-        {
-        public:
-            explicit DGSLEffect(_In_ ID3D11Device* device, _In_opt_ ID3D11PixelShader* pixelShader = nullptr) :
-                DGSLEffect(device, pixelShader, false)
-            {
-            }
-
-            DGSLEffect(DGSLEffect&&) noexcept;
-            DGSLEffect& operator= (DGSLEffect&&) noexcept;
-
-            DGSLEffect(DGSLEffect const&) = delete;
-            DGSLEffect& operator= (DGSLEffect const&) = delete;
-
-            ~DGSLEffect() override;
-
-            // IEffect methods.
-            void __cdecl Apply(_In_ ID3D11DeviceContext* deviceContext) override;
-
-            void __cdecl GetVertexShaderBytecode(_Out_ void const** pShaderByteCode, _Out_ size_t* pByteCodeLength) override;
-
-            // Camera settings.
-            void XM_CALLCONV SetWorld(FXMMATRIX value) override;
-            void XM_CALLCONV SetView(FXMMATRIX value) override;
-            void XM_CALLCONV SetProjection(FXMMATRIX value) override;
-            void XM_CALLCONV SetMatrices(FXMMATRIX world, CXMMATRIX view, CXMMATRIX projection) override;
-
-            // Material settings.
-            void XM_CALLCONV SetAmbientColor(FXMVECTOR value);
-            void XM_CALLCONV SetDiffuseColor(FXMVECTOR value);
-            void XM_CALLCONV SetEmissiveColor(FXMVECTOR value);
-            void XM_CALLCONV SetSpecularColor(FXMVECTOR value);
-            void __cdecl SetSpecularPower(float value);
-            void __cdecl DisableSpecular();
-            void __cdecl SetAlpha(float value);
-            void XM_CALLCONV SetColorAndAlpha(FXMVECTOR value);
-
-            // Additional settings.
-            void XM_CALLCONV SetUVTransform(FXMMATRIX value);
-            void __cdecl SetViewport(float width, float height);
-            void __cdecl SetTime(float time);
-            void __cdecl SetAlphaDiscardEnable(bool value);
-
-            // Light settings.
-            void __cdecl SetLightingEnabled(bool value) override;
-            void XM_CALLCONV SetAmbientLightColor(FXMVECTOR value) override;
-
-            void __cdecl SetLightEnabled(int whichLight, bool value) override;
-            void XM_CALLCONV SetLightDirection(int whichLight, FXMVECTOR value) override;
-            void XM_CALLCONV SetLightDiffuseColor(int whichLight, FXMVECTOR value) override;
-            void XM_CALLCONV SetLightSpecularColor(int whichLight, FXMVECTOR value) override;
-
-            void __cdecl EnableDefaultLighting() override;
-
-            static constexpr int MaxDirectionalLights = 4;
-
-            // Vertex color setting.
-            void __cdecl SetVertexColorEnabled(bool value);
-
-            // Texture settings.
-            void __cdecl SetTextureEnabled(bool value);
-            void __cdecl SetTexture(_In_opt_ ID3D11ShaderResourceView* value);
-            void __cdecl SetTexture(int whichTexture, _In_opt_ ID3D11ShaderResourceView* value);
-
-            static constexpr int MaxTextures = 8;
-
-        protected:
-            // Private implementation.
-            class Impl;
-
-            std::unique_ptr<Impl> pImpl;
-
-            DGSLEffect(_In_ ID3D11Device* device, _In_opt_ ID3D11PixelShader* pixelShader, bool skinningEnabled);
-
-            // Unsupported interface methods.
-            void __cdecl SetPerPixelLighting(bool value) override;
-        };
-
-        class SkinnedDGSLEffect : public DGSLEffect, public IEffectSkinning
-        {
-        public:
-            explicit SkinnedDGSLEffect(_In_ ID3D11Device* device, _In_opt_ ID3D11PixelShader* pixelShader = nullptr) :
-                DGSLEffect(device, pixelShader, true)
-            {
-            }
-
-            SkinnedDGSLEffect(SkinnedDGSLEffect&&) = default;
-            SkinnedDGSLEffect& operator= (SkinnedDGSLEffect&&) = default;
-
-            SkinnedDGSLEffect(SkinnedDGSLEffect const&) = delete;
-            SkinnedDGSLEffect& operator= (SkinnedDGSLEffect const&) = delete;
-
-            ~SkinnedDGSLEffect() override;
-
-            // Animation setting.
-            void __cdecl SetWeightsPerVertex(int value) override;
-            void __cdecl SetBoneTransforms(_In_reads_(count) XMMATRIX const* value, size_t count) override;
-            void __cdecl ResetBoneTransforms() override;
-        };
-
-        //------------------------------------------------------------------------------
-        // Built-in shader extends BasicEffect with normal maps and optional specular maps
+        // Built-in shader extends BasicEffect with normal map and optional specular map
         class NormalMapEffect : public IEffect, public IEffectMatrices, public IEffectLights, public IEffectFog
         {
         public:
-            explicit NormalMapEffect(_In_ ID3D11Device* device) :
-                NormalMapEffect(device, false)
+            NormalMapEffect(_In_ ID3D12Device* device, uint32_t effectFlags,
+                const EffectPipelineStateDescription& pipelineDescription) :
+                NormalMapEffect(device, effectFlags, pipelineDescription, false)
             {
             }
 
@@ -594,9 +489,7 @@ namespace DirectX
             ~NormalMapEffect() override;
 
             // IEffect methods.
-            void __cdecl Apply(_In_ ID3D11DeviceContext* deviceContext) override;
-
-            void __cdecl GetVertexShaderBytecode(_Out_ void const** pShaderByteCode, _Out_ size_t* pByteCodeLength) override;
+            void __cdecl Apply(_In_ ID3D12GraphicsCommandList* commandList) override;
 
             // Camera settings.
             void XM_CALLCONV SetWorld(FXMMATRIX value) override;
@@ -624,24 +517,14 @@ namespace DirectX
             void __cdecl EnableDefaultLighting() override;
 
             // Fog settings.
-            void __cdecl SetFogEnabled(bool value) override;
             void __cdecl SetFogStart(float value) override;
             void __cdecl SetFogEnd(float value) override;
             void XM_CALLCONV SetFogColor(FXMVECTOR value) override;
 
-            // Vertex color setting.
-            void __cdecl SetVertexColorEnabled(bool value);
-
             // Texture setting - albedo, normal and specular intensity
-            void __cdecl SetTexture(_In_opt_ ID3D11ShaderResourceView* value);
-            void __cdecl SetNormalTexture(_In_opt_ ID3D11ShaderResourceView* value);
-            void __cdecl SetSpecularTexture(_In_opt_ ID3D11ShaderResourceView* value);
-
-            // Normal compression settings.
-            void __cdecl SetBiasedVertexNormals(bool value);
-
-            // Instancing settings.
-            void __cdecl SetInstancingEnabled(bool value);
+            void __cdecl SetTexture(D3D12_GPU_DESCRIPTOR_HANDLE srvDescriptor, D3D12_GPU_DESCRIPTOR_HANDLE samplerDescriptor);
+            void __cdecl SetNormalTexture(D3D12_GPU_DESCRIPTOR_HANDLE srvDescriptor);
+            void __cdecl SetSpecularTexture(D3D12_GPU_DESCRIPTOR_HANDLE srvDescriptor);
 
         protected:
             // Private implementation.
@@ -649,18 +532,16 @@ namespace DirectX
 
             std::unique_ptr<Impl> pImpl;
 
-            NormalMapEffect(_In_ ID3D11Device* device, bool skinningEnabled);
-
-            // Unsupported interface methods.
-            void __cdecl SetLightingEnabled(bool value) override;
-            void __cdecl SetPerPixelLighting(bool value) override;
+            NormalMapEffect(_In_ ID3D12Device* device, uint32_t effectFlags,
+                const EffectPipelineStateDescription& pipelineDescription, bool skinningEnabled);
         };
 
         class SkinnedNormalMapEffect : public NormalMapEffect, public IEffectSkinning
         {
         public:
-            explicit SkinnedNormalMapEffect(_In_ ID3D11Device* device) :
-                NormalMapEffect(device, true)
+            SkinnedNormalMapEffect(_In_ ID3D12Device* device, uint32_t effectFlags,
+                const EffectPipelineStateDescription& pipelineDescription) :
+                NormalMapEffect(device, effectFlags, pipelineDescription, true)
             {
             }
 
@@ -673,18 +554,19 @@ namespace DirectX
             ~SkinnedNormalMapEffect() override;
 
             // Animation settings.
-            void __cdecl SetWeightsPerVertex(int value) override;
             void __cdecl SetBoneTransforms(_In_reads_(count) XMMATRIX const* value, size_t count) override;
             void __cdecl ResetBoneTransforms() override;
         };
+
 
         //------------------------------------------------------------------------------
         // Built-in shader for Physically-Based Rendering (Roughness/Metalness) with Image-based lighting
         class PBREffect : public IEffect, public IEffectMatrices, public IEffectLights
         {
         public:
-            explicit PBREffect(_In_ ID3D11Device* device) :
-                PBREffect(device, false)
+            PBREffect(_In_ ID3D12Device* device, uint32_t effectFlags,
+                const EffectPipelineStateDescription& pipelineDescription) :
+                PBREffect(device, effectFlags, pipelineDescription, false)
             {
             }
 
@@ -697,9 +579,7 @@ namespace DirectX
             ~PBREffect() override;
 
             // IEffect methods.
-            void __cdecl Apply(_In_ ID3D11DeviceContext* deviceContext) override;
-
-            void __cdecl GetVertexShaderBytecode(_Out_ void const** pShaderByteCode, _Out_ size_t* pByteCodeLength) override;
+            void __cdecl Apply(_In_ ID3D12GraphicsCommandList* commandList) override;
 
             // Camera settings.
             void XM_CALLCONV SetWorld(FXMMATRIX value) override;
@@ -721,30 +601,23 @@ namespace DirectX
             void __cdecl SetConstantRoughness(float value);
 
             // Texture settings.
-            void __cdecl SetAlbedoTexture(_In_opt_ ID3D11ShaderResourceView* value);
-            void __cdecl SetNormalTexture(_In_opt_ ID3D11ShaderResourceView* value);
-            void __cdecl SetRMATexture(_In_opt_ ID3D11ShaderResourceView* value);
+            void __cdecl SetAlbedoTexture(D3D12_GPU_DESCRIPTOR_HANDLE srvDescriptor, D3D12_GPU_DESCRIPTOR_HANDLE samplerDescriptor);
+            void __cdecl SetNormalTexture(D3D12_GPU_DESCRIPTOR_HANDLE srvDescriptor);
+            void __cdecl SetRMATexture(D3D12_GPU_DESCRIPTOR_HANDLE srvDescriptor);
 
-            void __cdecl SetEmissiveTexture(_In_opt_ ID3D11ShaderResourceView* value);
+            void __cdecl SetEmissiveTexture(D3D12_GPU_DESCRIPTOR_HANDLE srvDescriptor);
 
             void __cdecl SetSurfaceTextures(
-                _In_opt_ ID3D11ShaderResourceView* albedo,
-                _In_opt_ ID3D11ShaderResourceView* normal,
-                _In_opt_ ID3D11ShaderResourceView* roughnessMetallicAmbientOcclusion);
+                D3D12_GPU_DESCRIPTOR_HANDLE albedo,
+                D3D12_GPU_DESCRIPTOR_HANDLE normal,
+                D3D12_GPU_DESCRIPTOR_HANDLE roughnessMetallicAmbientOcclusion,
+                D3D12_GPU_DESCRIPTOR_HANDLE sampler);
 
             void __cdecl SetIBLTextures(
-                _In_opt_ ID3D11ShaderResourceView* radiance,
+                D3D12_GPU_DESCRIPTOR_HANDLE radiance,
                 int numRadianceMips,
-                _In_opt_ ID3D11ShaderResourceView* irradiance);
-
-            // Normal compression settings.
-            void __cdecl SetBiasedVertexNormals(bool value);
-
-            // Instancing settings.
-            void __cdecl SetInstancingEnabled(bool value);
-
-            // Velocity buffer settings.
-            void __cdecl SetVelocityGeneration(bool value);
+                D3D12_GPU_DESCRIPTOR_HANDLE irradiance,
+                D3D12_GPU_DESCRIPTOR_HANDLE sampler);
 
             // Render target size, required for velocity buffer output.
             void __cdecl SetRenderTargetSizeInPixels(int width, int height);
@@ -755,11 +628,10 @@ namespace DirectX
 
             std::unique_ptr<Impl> pImpl;
 
-            PBREffect(_In_ ID3D11Device* device, bool skinningEnabled);
+            PBREffect(_In_ ID3D12Device* device, uint32_t effectFlags,
+                const EffectPipelineStateDescription& pipelineDescription, bool skinningEnabled);
 
             // Unsupported interface methods.
-            void __cdecl SetLightingEnabled(bool value) override;
-            void __cdecl SetPerPixelLighting(bool value) override;
             void XM_CALLCONV SetAmbientLightColor(FXMVECTOR value) override;
             void XM_CALLCONV SetLightSpecularColor(int whichLight, FXMVECTOR value) override;
         };
@@ -767,8 +639,9 @@ namespace DirectX
         class SkinnedPBREffect : public PBREffect, public IEffectSkinning
         {
         public:
-            explicit SkinnedPBREffect(_In_ ID3D11Device* device) :
-                PBREffect(device, true)
+            SkinnedPBREffect(_In_ ID3D12Device* device, uint32_t effectFlags,
+                const EffectPipelineStateDescription& pipelineDescription) :
+                PBREffect(device, effectFlags, pipelineDescription, true)
             {
             }
 
@@ -781,10 +654,10 @@ namespace DirectX
             ~SkinnedPBREffect() override;
 
             // Animation settings.
-            void __cdecl SetWeightsPerVertex(int value) override;
             void __cdecl SetBoneTransforms(_In_reads_(count) XMMATRIX const* value, size_t count) override;
             void __cdecl ResetBoneTransforms() override;
         };
+
 
         //------------------------------------------------------------------------------
         // Built-in shader for debug visualization of normals, tangents, etc.
@@ -799,7 +672,9 @@ namespace DirectX
                 Mode_BiTangents,    // RGB bi-tangents
             };
 
-            explicit DebugEffect(_In_ ID3D11Device* device);
+            DebugEffect(_In_ ID3D12Device* device, uint32_t effectFlags,
+                const EffectPipelineStateDescription& pipelineDescription,
+                Mode debugMode = Mode_Default);
 
             DebugEffect(DebugEffect&&) noexcept;
             DebugEffect& operator= (DebugEffect&&) noexcept;
@@ -810,9 +685,7 @@ namespace DirectX
             ~DebugEffect() override;
 
             // IEffect methods.
-            void __cdecl Apply(_In_ ID3D11DeviceContext* deviceContext) override;
-
-            void __cdecl GetVertexShaderBytecode(_Out_ void const** pShaderByteCode, _Out_ size_t* pByteCodeLength) override;
+            void __cdecl Apply(_In_ ID3D12GraphicsCommandList* commandList) override;
 
             // Camera settings.
             void XM_CALLCONV SetWorld(FXMMATRIX value) override;
@@ -821,18 +694,8 @@ namespace DirectX
             void XM_CALLCONV SetMatrices(FXMMATRIX world, CXMMATRIX view, CXMMATRIX projection) override;
 
             // Debug Settings.
-            void __cdecl SetMode(Mode debugMode);
             void XM_CALLCONV SetHemisphericalAmbientColor(FXMVECTOR upper, FXMVECTOR lower);
             void __cdecl SetAlpha(float value);
-
-            // Vertex color setting.
-            void __cdecl SetVertexColorEnabled(bool value);
-
-            // Normal compression settings.
-            void __cdecl SetBiasedVertexNormals(bool value);
-
-            // Instancing settings.
-            void __cdecl SetInstancingEnabled(bool value);
 
         private:
             // Private implementation.
@@ -841,8 +704,83 @@ namespace DirectX
             std::unique_ptr<Impl> pImpl;
         };
 
+
         //------------------------------------------------------------------------------
-        // Abstract interface to factory for sharing effects and texture resources
+        // Abstract interface to factory texture resources
+        class IEffectTextureFactory
+        {
+        public:
+            virtual ~IEffectTextureFactory() = default;
+
+            IEffectTextureFactory(const IEffectTextureFactory&) = delete;
+            IEffectTextureFactory& operator=(const IEffectTextureFactory&) = delete;
+
+            virtual size_t __cdecl CreateTexture(_In_z_ const wchar_t* name, int descriptorIndex) = 0;
+
+        protected:
+            IEffectTextureFactory() = default;
+            IEffectTextureFactory(IEffectTextureFactory&&) = default;
+            IEffectTextureFactory& operator=(IEffectTextureFactory&&) = default;
+        };
+
+
+        // Factory for sharing texture resources
+        class EffectTextureFactory : public IEffectTextureFactory
+        {
+        public:
+            EffectTextureFactory(
+                _In_ ID3D12Device* device,
+                ResourceUploadBatch& resourceUploadBatch,
+                _In_ ID3D12DescriptorHeap* descriptorHeap) noexcept(false);
+
+            EffectTextureFactory(
+                _In_ ID3D12Device* device,
+                ResourceUploadBatch& resourceUploadBatch,
+                _In_ size_t numDescriptors,
+                _In_ D3D12_DESCRIPTOR_HEAP_FLAGS descriptorHeapFlags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE) noexcept(false);
+
+            EffectTextureFactory(EffectTextureFactory&&) noexcept;
+            EffectTextureFactory& operator= (EffectTextureFactory&&) noexcept;
+
+            EffectTextureFactory(EffectTextureFactory const&) = delete;
+            EffectTextureFactory& operator= (EffectTextureFactory const&) = delete;
+
+            ~EffectTextureFactory() override;
+
+            size_t __cdecl CreateTexture(_In_z_ const wchar_t* name, int descriptorIndex) override;
+
+            ID3D12DescriptorHeap* __cdecl Heap() const noexcept;
+
+            // Shorthand accessors for the descriptor heap
+            D3D12_CPU_DESCRIPTOR_HANDLE __cdecl GetCpuDescriptorHandle(size_t index) const;
+            D3D12_GPU_DESCRIPTOR_HANDLE __cdecl GetGpuDescriptorHandle(size_t index) const;
+
+            // How many textures are there in this factory?
+            size_t __cdecl ResourceCount() const noexcept;
+
+            // Get a resource in a specific slot (note: increases reference count on resource)
+            void __cdecl GetResource(size_t slot, _Out_ ID3D12Resource** resource, _Out_opt_ bool* isCubeMap = nullptr);
+
+            // Settings.
+            void __cdecl ReleaseCache();
+
+            void __cdecl SetSharing(bool enabled) noexcept;
+
+            void __cdecl EnableForceSRGB(bool forceSRGB) noexcept;
+            void __cdecl EnableAutoGenMips(bool generateMips) noexcept;
+
+            void __cdecl SetDirectory(_In_opt_z_ const wchar_t* path) noexcept;
+
+        private:
+            // Private implementation
+            class Impl;
+
+            std::unique_ptr<Impl> pImpl;
+        };
+
+
+        //------------------------------------------------------------------------------
+        // Abstract interface to factory for sharing effects
         class IEffectFactory
         {
         public:
@@ -853,47 +791,54 @@ namespace DirectX
 
             struct EffectInfo
             {
-                const wchar_t*      name;
+                std::wstring        name;
                 bool                perVertexColor;
                 bool                enableSkinning;
                 bool                enableDualTexture;
                 bool                enableNormalMaps;
                 bool                biasedVertexNormals;
                 float               specularPower;
-                float               alpha;
+                float               alphaValue;
                 XMFLOAT3            ambientColor;
                 XMFLOAT3            diffuseColor;
                 XMFLOAT3            specularColor;
                 XMFLOAT3            emissiveColor;
-                const wchar_t*      diffuseTexture;
-                const wchar_t*      specularTexture;
-                const wchar_t*      normalTexture;
-                const wchar_t*      emissiveTexture;
+                int                 diffuseTextureIndex;
+                int                 specularTextureIndex;
+                int                 normalTextureIndex;
+                int                 emissiveTextureIndex;
+                int                 samplerIndex;
+                int                 samplerIndex2;
 
-                EffectInfo() noexcept :
-                    name(nullptr),
-                    perVertexColor(false),
-                    enableSkinning(false),
-                    enableDualTexture(false),
-                    enableNormalMaps(false),
-                    biasedVertexNormals(false),
-                    specularPower(0),
-                    alpha(0),
-                    ambientColor(0, 0, 0),
-                    diffuseColor(0, 0, 0),
-                    specularColor(0, 0, 0),
-                    emissiveColor(0, 0, 0),
-                    diffuseTexture(nullptr),
-                    specularTexture(nullptr),
-                    normalTexture(nullptr),
-                    emissiveTexture(nullptr)
+                EffectInfo() noexcept
+                    : perVertexColor(false)
+                    , enableSkinning(false)
+                    , enableDualTexture(false)
+                    , enableNormalMaps(false)
+                    , biasedVertexNormals(false)
+                    , specularPower(0)
+                    , alphaValue(0)
+                    , ambientColor(0, 0, 0)
+                    , diffuseColor(0, 0, 0)
+                    , specularColor(0, 0, 0)
+                    , emissiveColor(0, 0, 0)
+                    , diffuseTextureIndex(-1)
+                    , specularTextureIndex(-1)
+                    , normalTextureIndex(-1)
+                    , emissiveTextureIndex(-1)
+                    , samplerIndex(-1)
+                    , samplerIndex2(-1)
                 {
                 }
             };
 
-            virtual std::shared_ptr<IEffect> __cdecl CreateEffect(_In_ const EffectInfo& info, _In_opt_ ID3D11DeviceContext* deviceContext) = 0;
-
-            virtual void __cdecl CreateTexture(_In_z_ const wchar_t* name, _In_opt_ ID3D11DeviceContext* deviceContext, _Outptr_ ID3D11ShaderResourceView** textureView) = 0;
+            virtual std::shared_ptr<IEffect> __cdecl CreateEffect(
+                const EffectInfo& info,
+                const EffectPipelineStateDescription& opaquePipelineState,
+                const EffectPipelineStateDescription& alphaPipelineState,
+                const D3D12_INPUT_LAYOUT_DESC& inputLayout,
+                int textureDescriptorOffset = 0,
+                int samplerDescriptorOffset = 0) = 0;
 
         protected:
             IEffectFactory() = default;
@@ -902,11 +847,14 @@ namespace DirectX
         };
 
 
-        // Factory for sharing effects and texture resources
+        // Factory for sharing effects
         class EffectFactory : public IEffectFactory
         {
         public:
-            explicit EffectFactory(_In_ ID3D11Device* device);
+            EffectFactory(_In_ ID3D12Device* device);
+            EffectFactory(
+                _In_ ID3D12DescriptorHeap* textureDescriptors,
+                _In_ ID3D12DescriptorHeap* samplerDescriptors);
 
             EffectFactory(EffectFactory&&) noexcept;
             EffectFactory& operator= (EffectFactory&&) noexcept;
@@ -917,21 +865,28 @@ namespace DirectX
             ~EffectFactory() override;
 
             // IEffectFactory methods.
-            std::shared_ptr<IEffect> __cdecl CreateEffect(_In_ const EffectInfo& info, _In_opt_ ID3D11DeviceContext* deviceContext) override;
-            void __cdecl CreateTexture(_In_z_ const wchar_t* name, _In_opt_ ID3D11DeviceContext* deviceContext, _Outptr_ ID3D11ShaderResourceView** textureView) override;
+            virtual std::shared_ptr<IEffect> __cdecl CreateEffect(
+                const EffectInfo& info,
+                const EffectPipelineStateDescription& opaquePipelineState,
+                const EffectPipelineStateDescription& alphaPipelineState,
+                const D3D12_INPUT_LAYOUT_DESC& inputLayout,
+                int textureDescriptorOffset = 0,
+                int samplerDescriptorOffset = 0) override;
 
             // Settings.
             void __cdecl ReleaseCache();
 
             void __cdecl SetSharing(bool enabled) noexcept;
 
+            void __cdecl EnableLighting(bool enabled) noexcept;
+
+            void __cdecl EnablePerPixelLighting(bool enabled) noexcept;
+
             void __cdecl EnableNormalMapEffect(bool enabled) noexcept;
-            void __cdecl EnableForceSRGB(bool forceSRGB) noexcept;
 
-            void __cdecl SetDirectory(_In_opt_z_ const wchar_t* path) noexcept;
+            void __cdecl EnableFogging(bool enabled) noexcept;
 
-            // Properties.
-            ID3D11Device* GetDevice() const noexcept;
+            void __cdecl EnableInstancing(bool enabled) noexcept;
 
         private:
             // Private implementation.
@@ -945,7 +900,10 @@ namespace DirectX
         class PBREffectFactory : public IEffectFactory
         {
         public:
-            explicit PBREffectFactory(_In_ ID3D11Device* device);
+            PBREffectFactory(_In_ ID3D12Device* device) noexcept(false);
+            PBREffectFactory(
+                _In_ ID3D12DescriptorHeap* textureDescriptors,
+                _In_ ID3D12DescriptorHeap* samplerDescriptors) noexcept(false);
 
             PBREffectFactory(PBREffectFactory&&) noexcept;
             PBREffectFactory& operator= (PBREffectFactory&&) noexcept;
@@ -956,78 +914,20 @@ namespace DirectX
             ~PBREffectFactory() override;
 
             // IEffectFactory methods.
-            std::shared_ptr<IEffect> __cdecl CreateEffect(_In_ const EffectInfo& info, _In_opt_ ID3D11DeviceContext* deviceContext) override;
-            void __cdecl CreateTexture(_In_z_ const wchar_t* name, _In_opt_ ID3D11DeviceContext* deviceContext, _Outptr_ ID3D11ShaderResourceView** textureView) override;
+            virtual std::shared_ptr<IEffect> __cdecl CreateEffect(
+                const EffectInfo& info,
+                const EffectPipelineStateDescription& opaquePipelineState,
+                const EffectPipelineStateDescription& alphaPipelineState,
+                const D3D12_INPUT_LAYOUT_DESC& inputLayout,
+                int textureDescriptorOffset = 0,
+                int samplerDescriptorOffset = 0) override;
 
             // Settings.
             void __cdecl ReleaseCache();
 
             void __cdecl SetSharing(bool enabled) noexcept;
 
-            void __cdecl EnableForceSRGB(bool forceSRGB) noexcept;
-
-            void __cdecl SetDirectory(_In_opt_z_ const wchar_t* path) noexcept;
-
-            // Properties.
-            ID3D11Device* GetDevice() const noexcept;
-
-        private:
-            // Private implementation.
-            class Impl;
-
-            std::shared_ptr<Impl> pImpl;
-        };
-
-
-        // Factory for sharing Visual Studio Shader Designer (DGSL) shaders and texture resources
-        class DGSLEffectFactory : public IEffectFactory
-        {
-        public:
-            explicit DGSLEffectFactory(_In_ ID3D11Device* device);
-
-            DGSLEffectFactory(DGSLEffectFactory&&) noexcept;
-            DGSLEffectFactory& operator= (DGSLEffectFactory&&) noexcept;
-
-            DGSLEffectFactory(DGSLEffectFactory const&) = delete;
-            DGSLEffectFactory& operator= (DGSLEffectFactory const&) = delete;
-
-            ~DGSLEffectFactory() override;
-
-            // IEffectFactory methods.
-            std::shared_ptr<IEffect> __cdecl CreateEffect(_In_ const EffectInfo& info, _In_opt_ ID3D11DeviceContext* deviceContext) override;
-            void __cdecl CreateTexture(_In_z_ const wchar_t* name, _In_opt_ ID3D11DeviceContext* deviceContext, _Outptr_ ID3D11ShaderResourceView** textureView) override;
-
-            // DGSL methods.
-            struct DGSLEffectInfo : public EffectInfo
-            {
-                static constexpr int BaseTextureOffset = 4;
-
-                const wchar_t* textures[DGSLEffect::MaxTextures - BaseTextureOffset];
-                const wchar_t* pixelShader;
-
-                DGSLEffectInfo() noexcept :
-                    EffectInfo(),
-                    textures{},
-                    pixelShader(nullptr)
-                {
-                }
-            };
-
-            virtual std::shared_ptr<IEffect> __cdecl CreateDGSLEffect(_In_ const DGSLEffectInfo& info, _In_opt_ ID3D11DeviceContext* deviceContext);
-
-            virtual void __cdecl CreatePixelShader(_In_z_ const wchar_t* shader, _Outptr_ ID3D11PixelShader** pixelShader);
-
-            // Settings.
-            void __cdecl ReleaseCache();
-
-            void __cdecl SetSharing(bool enabled) noexcept;
-
-            void __cdecl EnableForceSRGB(bool forceSRGB) noexcept;
-
-            void __cdecl SetDirectory(_In_opt_z_ const wchar_t* path) noexcept;
-
-            // Properties.
-            ID3D11Device* GetDevice() const noexcept;
+            void __cdecl EnableInstancing(bool enabled) noexcept;
 
         private:
             // Private implementation.

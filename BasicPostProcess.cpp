@@ -4,17 +4,19 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 //
-// http://go.microsoft.com/fwlink/?LinkId=248929
+// http://go.microsoft.com/fwlink/?LinkID=615561
 //--------------------------------------------------------------------------------------
 
 #include "pch.h"
 #include "PostProcess.h"
 
-#include "BufferHelpers.h"
-#include "CommonStates.h"
-#include "DirectXHelpers.h"
 #include "AlignedNew.h"
+#include "CommonStates.h"
 #include "DemandCreate.h"
+#include "DirectXHelpers.h"
+#include "EffectPipelineStateDescription.h"
+#include "GraphicsMemory.h"
+#include "PlatformHelpers.h"
 #include "SharedResourcePool.h"
 
 using namespace DirectX;
@@ -27,6 +29,8 @@ namespace
 
     constexpr int Dirty_ConstantBuffer = 0x01;
     constexpr int Dirty_Parameters = 0x02;
+
+    constexpr int RootSignatureCount = 2;
 
     // Constant buffer layout. Must match the shader!
     XM_ALIGNED_STRUCT(16) PostProcessConstants
@@ -48,7 +52,32 @@ namespace
 // Include the precompiled shader code.
 namespace
 {
-#if defined(_XBOX_ONE) && defined(_TITLE)
+#ifdef _GAMING_XBOX_SCARLETT
+#include "XboxGamingScarlettPostProcess_VSQuadNoCB.inc"
+#include "XboxGamingScarlettPostProcess_VSQuad.inc"
+
+#include "XboxGamingScarlettPostProcess_PSCopy.inc"
+#include "XboxGamingScarlettPostProcess_PSMonochrome.inc"
+#include "XboxGamingScarlettPostProcess_PSSepia.inc"
+#include "XboxGamingScarlettPostProcess_PSDownScale2x2.inc"
+#include "XboxGamingScarlettPostProcess_PSDownScale4x4.inc"
+#include "XboxGamingScarlettPostProcess_PSGaussianBlur5x5.inc"
+#include "XboxGamingScarlettPostProcess_PSBloomExtract.inc"
+#include "XboxGamingScarlettPostProcess_PSBloomBlur.inc"
+#elif defined(_GAMING_XBOX)
+#include "XboxGamingXboxOnePostProcess_VSQuadNoCB.inc"
+#include "XboxGamingXboxOnePostProcess_VSQuad.inc"
+
+#include "XboxGamingXboxOnePostProcess_PSCopy.inc"
+#include "XboxGamingXboxOnePostProcess_PSMonochrome.inc"
+#include "XboxGamingXboxOnePostProcess_PSSepia.inc"
+#include "XboxGamingXboxOnePostProcess_PSDownScale2x2.inc"
+#include "XboxGamingXboxOnePostProcess_PSDownScale4x4.inc"
+#include "XboxGamingXboxOnePostProcess_PSGaussianBlur5x5.inc"
+#include "XboxGamingXboxOnePostProcess_PSBloomExtract.inc"
+#include "XboxGamingXboxOnePostProcess_PSBloomBlur.inc"
+#elif defined(_XBOX_ONE) && defined(_TITLE)
+#include "XboxOnePostProcess_VSQuadNoCB.inc"
 #include "XboxOnePostProcess_VSQuad.inc"
 
 #include "XboxOnePostProcess_PSCopy.inc"
@@ -60,6 +89,7 @@ namespace
 #include "XboxOnePostProcess_PSBloomExtract.inc"
 #include "XboxOnePostProcess_PSBloomBlur.inc"
 #else
+#include "PostProcess_VSQuadNoCB.inc"
 #include "PostProcess_VSQuad.inc"
 
 #include "PostProcess_PSCopy.inc"
@@ -71,14 +101,17 @@ namespace
 #include "PostProcess_PSBloomExtract.inc"
 #include "PostProcess_PSBloomBlur.inc"
 #endif
+}
 
-    struct ShaderBytecode
+namespace
+{
+    const D3D12_SHADER_BYTECODE vertexShader[] =
     {
-        void const* code;
-        size_t length;
+        { PostProcess_VSQuadNoCB,               sizeof(PostProcess_VSQuadNoCB) },
+        { PostProcess_VSQuad,                   sizeof(PostProcess_VSQuad) },
     };
 
-    const ShaderBytecode pixelShaders[] =
+    const D3D12_SHADER_BYTECODE pixelShaders[] =
     {
         { PostProcess_PSCopy,                   sizeof(PostProcess_PSCopy) },
         { PostProcess_PSMonochrome,             sizeof(PostProcess_PSMonochrome) },
@@ -92,15 +125,13 @@ namespace
 
     static_assert(static_cast<unsigned int>(std::size(pixelShaders)) == BasicPostProcess::Effect_Max, "array/max mismatch");
 
-    // Factory for lazily instantiating shaders.
+    // Factory for lazily instantiating shared root signatures.
     class DeviceResources
     {
     public:
-        DeviceResources(_In_ ID3D11Device* device)
-            : stateObjects(device),
-            mDevice(device),
-            mVertexShader{},
-            mPixelShaders{},
+        DeviceResources(_In_ ID3D12Device* device) noexcept
+            : mDevice(device),
+            mRootSignature{},
             mMutex{}
         { }
 
@@ -110,53 +141,36 @@ namespace
         DeviceResources(DeviceResources&&) = delete;
         DeviceResources& operator=(DeviceResources&&) = delete;
 
-        // Gets or lazily creates the vertex shader.
-        ID3D11VertexShader* GetVertexShader()
+        ID3D12RootSignature* GetRootSignature(int slot, const D3D12_ROOT_SIGNATURE_DESC& desc)
         {
-            return DemandCreate(mVertexShader, mMutex, [&](ID3D11VertexShader** pResult) -> HRESULT
+            assert(slot >= 0 && slot < RootSignatureCount);
+            _Analysis_assume_(slot >= 0 && slot < RootSignatureCount);
+
+            return DemandCreate(mRootSignature[slot], mMutex, [&](ID3D12RootSignature** pResult) noexcept -> HRESULT
                 {
-                    HRESULT hr = mDevice->CreateVertexShader(PostProcess_VSQuad, sizeof(PostProcess_VSQuad), nullptr, pResult);
+                    HRESULT hr = CreateRootSignature(mDevice.Get(), &desc, pResult);
 
                     if (SUCCEEDED(hr))
-                        SetDebugObjectName(*pResult, "BasicPostProcess");
+                        SetDebugObjectName(*pResult, L"BasicPostProcess");
 
                     return hr;
                 });
         }
 
-        // Gets or lazily creates the specified pixel shader.
-        ID3D11PixelShader* GetPixelShader(unsigned int shaderIndex)
-        {
-            assert(shaderIndex < BasicPostProcess::Effect_Max);
-            _Analysis_assume_(shaderIndex < BasicPostProcess::Effect_Max);
-
-            return DemandCreate(mPixelShaders[shaderIndex], mMutex, [&](ID3D11PixelShader** pResult) -> HRESULT
-                {
-                    HRESULT hr = mDevice->CreatePixelShader(pixelShaders[shaderIndex].code, pixelShaders[shaderIndex].length, nullptr, pResult);
-
-                    if (SUCCEEDED(hr))
-                        SetDebugObjectName(*pResult, "BasicPostProcess");
-
-                    return hr;
-                });
-        }
-
-        CommonStates                stateObjects;
+        ID3D12Device* GetDevice() const noexcept { return mDevice.Get(); }
 
     protected:
-        ComPtr<ID3D11Device>        mDevice;
-        ComPtr<ID3D11VertexShader>  mVertexShader;
-        ComPtr<ID3D11PixelShader>   mPixelShaders[BasicPostProcess::Effect_Max];
+        ComPtr<ID3D12Device>        mDevice;
+        ComPtr<ID3D12RootSignature> mRootSignature[RootSignatureCount];
         std::mutex                  mMutex;
     };
 }
 #pragma endregion
 
-
 class BasicPostProcess::Impl : public AlignedNew<PostProcessConstants>
 {
 public:
-    explicit Impl(_In_ ID3D11Device* device);
+    Impl(_In_ ID3D12Device* device, const RenderTargetState& rtState, Effect ifx);
 
     Impl(const Impl&) = delete;
     Impl& operator=(const Impl&) = delete;
@@ -164,15 +178,21 @@ public:
     Impl(Impl&&) = default;
     Impl& operator=(Impl&&) = default;
 
-    void Process(_In_ ID3D11DeviceContext* deviceContext, const std::function<void __cdecl()>& setCustomState);
+    void Process(_In_ ID3D12GraphicsCommandList* commandList);
 
-    void SetConstants(bool value = true) noexcept { mUseConstants = value; mDirtyFlags = INT_MAX; }
     void SetDirtyFlag() noexcept { mDirtyFlags = INT_MAX; }
 
+    enum RootParameterIndex
+    {
+        TextureSRV,
+        ConstantBuffer,
+        RootParameterCount
+    };
+
     // Fields.
-    PostProcessConstants                    constants;
     BasicPostProcess::Effect                fx;
-    ComPtr<ID3D11ShaderResourceView>        texture;
+    PostProcessConstants                    constants;
+    D3D12_GPU_DESCRIPTOR_HANDLE             texture;
     unsigned                                texWidth;
     unsigned                                texHeight;
     float                                   guassianMultiplier;
@@ -190,23 +210,31 @@ private:
     void                                    GaussianBlur5x5(float multiplier);
     void                                    Bloom(bool horizontal, float size, float brightness);
 
-    ConstantBuffer<PostProcessConstants>    mConstantBuffer;
+    // D3D constant buffer holds a copy of the same data as the public 'constants' field.
+    GraphicsResource mConstantBuffer;
+
+    // Per instance cache of PSOs, populated with variants for each shader & layout
+    ComPtr<ID3D12PipelineState> mPipelineState;
+
+    // Per instance root signature
+    ID3D12RootSignature* mRootSignature;
 
     // Per-device resources.
-    std::shared_ptr<DeviceResources>        mDeviceResources;
+    std::shared_ptr<DeviceResources> mDeviceResources;
 
-    static SharedResourcePool<ID3D11Device*, DeviceResources> deviceResourcesPool;
+    static SharedResourcePool<ID3D12Device*, DeviceResources> deviceResourcesPool;
 };
 
 
 // Global pool of per-device BasicPostProcess resources.
-SharedResourcePool<ID3D11Device*, DeviceResources> BasicPostProcess::Impl::deviceResourcesPool;
+SharedResourcePool<ID3D12Device*, DeviceResources> BasicPostProcess::Impl::deviceResourcesPool;
 
 
 // Constructor.
-BasicPostProcess::Impl::Impl(_In_ ID3D11Device* device)
-    : constants{},
-    fx(BasicPostProcess::Copy),
+BasicPostProcess::Impl::Impl(_In_ ID3D12Device* device, const RenderTargetState& rtState, Effect ifx)
+    : fx(ifx),
+    constants{},
+    texture{},
     texWidth(0),
     texHeight(0),
     guassianMultiplier(1.f),
@@ -214,43 +242,115 @@ BasicPostProcess::Impl::Impl(_In_ ID3D11Device* device)
     bloomBrightness(1.f),
     bloomThreshold(0.25f),
     bloomHorizontal(true),
-    mUseConstants(false),
     mDirtyFlags(INT_MAX),
-    mConstantBuffer(device),
     mDeviceResources(deviceResourcesPool.DemandCreate(device))
 {
-    if (device->GetFeatureLevel() < D3D_FEATURE_LEVEL_10_0)
+    if (ifx >= Effect_Max)
+        throw std::invalid_argument("Effect not defined");
+
+    switch (ifx)
     {
-        throw std::runtime_error("BasicPostProcess requires Feature Level 10.0 or later");
+    case Copy:
+    case Monochrome:
+    case Sepia:
+        // These shaders don't use the constant buffer
+        mUseConstants = false;
+        break;
+
+    default:
+        mUseConstants = true;
+        break;
     }
 
-    SetDebugObjectName(mConstantBuffer.GetBuffer(), "BasicPostProcess");
+    // Create root signature.
+    {
+        ENUM_FLAGS_CONSTEXPR D3D12_ROOT_SIGNATURE_FLAGS rootSignatureFlags =
+            D3D12_ROOT_SIGNATURE_FLAG_DENY_VERTEX_SHADER_ROOT_ACCESS
+            | D3D12_ROOT_SIGNATURE_FLAG_DENY_DOMAIN_SHADER_ROOT_ACCESS
+            | D3D12_ROOT_SIGNATURE_FLAG_DENY_GEOMETRY_SHADER_ROOT_ACCESS
+            | D3D12_ROOT_SIGNATURE_FLAG_DENY_HULL_SHADER_ROOT_ACCESS
+#ifdef _GAMING_XBOX_SCARLETT
+            | D3D12_ROOT_SIGNATURE_FLAG_DENY_AMPLIFICATION_SHADER_ROOT_ACCESS
+            | D3D12_ROOT_SIGNATURE_FLAG_DENY_MESH_SHADER_ROOT_ACCESS
+#endif
+            ;
+
+        const CD3DX12_DESCRIPTOR_RANGE textureSRVs(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0);
+
+        // Same as CommonStates::StaticLinearClamp
+        const CD3DX12_STATIC_SAMPLER_DESC sampler(
+            0, // register
+            D3D12_FILTER_MIN_MAG_MIP_LINEAR,
+            D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
+            D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
+            D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
+            0.f,
+            16,
+            D3D12_COMPARISON_FUNC_LESS_EQUAL,
+            D3D12_STATIC_BORDER_COLOR_OPAQUE_WHITE,
+            0.f,
+            D3D12_FLOAT32_MAX,
+            D3D12_SHADER_VISIBILITY_PIXEL);
+
+        CD3DX12_ROOT_PARAMETER rootParameters[RootParameterIndex::RootParameterCount] = {};
+        rootParameters[RootParameterIndex::TextureSRV].InitAsDescriptorTable(1, &textureSRVs, D3D12_SHADER_VISIBILITY_PIXEL);
+
+        // Root parameter descriptor - conditionally initialized
+        CD3DX12_ROOT_SIGNATURE_DESC rsigDesc = {};
+
+        if (mUseConstants)
+        {
+            // Include constant buffer
+            rootParameters[RootParameterIndex::ConstantBuffer].InitAsConstantBufferView(0, 0, D3D12_SHADER_VISIBILITY_PIXEL);
+
+            // use all parameters
+            rsigDesc.Init(static_cast<UINT>(std::size(rootParameters)), rootParameters, 1, &sampler, rootSignatureFlags);
+
+            mRootSignature = mDeviceResources->GetRootSignature(1, rsigDesc);
+        }
+        else
+        {
+            // only use constant
+            rsigDesc.Init(1, rootParameters, 1, &sampler, rootSignatureFlags);
+
+            mRootSignature = mDeviceResources->GetRootSignature(0, rsigDesc);
+        }
+    }
+
+    assert(mRootSignature != nullptr);
+
+    // Create pipeline state.
+    const EffectPipelineStateDescription psd(nullptr,
+        CommonStates::Opaque,
+        CommonStates::DepthNone,
+        CommonStates::CullNone,
+        rtState,
+        D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE);
+
+    psd.CreatePipelineState(
+        device,
+        mRootSignature,
+        vertexShader[mUseConstants ? 1 : 0],
+        pixelShaders[ifx],
+        mPipelineState.GetAddressOf());
+
+    SetDebugObjectName(mPipelineState.Get(), L"BasicPostProcess");
 }
 
 
 // Sets our state onto the D3D device.
-void BasicPostProcess::Impl::Process(
-    _In_ ID3D11DeviceContext* deviceContext,
-    const std::function<void __cdecl()>& setCustomState)
+void BasicPostProcess::Impl::Process(_In_ ID3D12GraphicsCommandList* commandList)
 {
+    // Set the root signature.
+    commandList->SetGraphicsRootSignature(mRootSignature);
+
     // Set the texture.
-    ID3D11ShaderResourceView* textures[1] = { texture.Get() };
-    deviceContext->PSSetShaderResources(0, 1, textures);
-
-    auto sampler = mDeviceResources->stateObjects.LinearClamp();
-    deviceContext->PSSetSamplers(0, 1, &sampler);
-
-    // Set state objects.
-    deviceContext->OMSetBlendState(mDeviceResources->stateObjects.Opaque(), nullptr, 0xffffffff);
-    deviceContext->OMSetDepthStencilState(mDeviceResources->stateObjects.DepthNone(), 0);
-    deviceContext->RSSetState(mDeviceResources->stateObjects.CullNone());
-
-    // Set shaders.
-    auto vertexShader = mDeviceResources->GetVertexShader();
-    auto pixelShader = mDeviceResources->GetPixelShader(fx);
-
-    deviceContext->VSSetShader(vertexShader, nullptr, 0);
-    deviceContext->PSSetShader(pixelShader, nullptr, 0);
+    if (!texture.ptr)
+    {
+        DebugTrace("ERROR: Missing texture for BasicPostProcess (texture %llu)\n", texture.ptr);
+        throw std::runtime_error("BasicPostProcess");
+    }
+    commandList->SetGraphicsRootDescriptorTable(RootParameterIndex::TextureSRV, texture);
 
     // Set constants.
     if (mUseConstants)
@@ -287,40 +387,21 @@ void BasicPostProcess::Impl::Process(
             }
         }
 
-    #if defined(_XBOX_ONE) && defined(_TITLE)
-        void *grfxMemory;
-        mConstantBuffer.SetData(deviceContext, constants, &grfxMemory);
-
-        ComPtr<ID3D11DeviceContextX> deviceContextX;
-        ThrowIfFailed(deviceContext->QueryInterface(IID_GRAPHICS_PPV_ARGS(deviceContextX.GetAddressOf())));
-
-        auto buffer = mConstantBuffer.GetBuffer();
-
-        deviceContextX->PSSetPlacementConstantBuffer(0, buffer, grfxMemory);
-    #else
         if (mDirtyFlags & Dirty_ConstantBuffer)
         {
             mDirtyFlags &= ~Dirty_ConstantBuffer;
-            mConstantBuffer.SetData(deviceContext, constants);
+            mConstantBuffer = GraphicsMemory::Get(mDeviceResources->GetDevice()).AllocateConstant(constants);
         }
 
-        // Set the constant buffer.
-        auto buffer = mConstantBuffer.GetBuffer();
-
-        deviceContext->PSSetConstantBuffers(0, 1, &buffer);
-    #endif
+        commandList->SetGraphicsRootConstantBufferView(RootParameterIndex::ConstantBuffer, mConstantBuffer.GpuAddress());
     }
 
-    if (setCustomState)
-    {
-        setCustomState();
-    }
+    // Set the pipeline state.
+    commandList->SetPipelineState(mPipelineState.Get());
 
     // Draw quad.
-    deviceContext->IASetInputLayout(nullptr);
-    deviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-
-    deviceContext->Draw(3, 0);
+    commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    commandList->DrawInstanced(3, 1, 0, 0);
 }
 
 
@@ -429,8 +510,8 @@ void BasicPostProcess::Impl::GaussianBlur5x5(float multiplier)
     const XMVECTOR vm = XMVectorReplicate(multiplier);
     for (size_t i = 0; i < index; ++i)
     {
-        weights[i] = XMVectorDivide(weights[i], vtw);
-        weights[i] = XMVectorMultiply(weights[i], vm);
+        const XMVECTOR w = XMVectorDivide(weights[i], vtw);
+        weights[i] = XMVectorMultiply(w, vm);
     }
 }
 
@@ -482,95 +563,40 @@ void  BasicPostProcess::Impl::Bloom(bool horizontal, float size, float brightnes
 
 
 // Public constructor.
-BasicPostProcess::BasicPostProcess(_In_ ID3D11Device* device)
-    : pImpl(std::make_unique<Impl>(device))
+BasicPostProcess::BasicPostProcess(_In_ ID3D12Device* device, const RenderTargetState& rtState, Effect fx)
+    : pImpl(std::make_unique<Impl>(device, rtState, fx))
 {
 }
 
 
+// Move constructor.
 BasicPostProcess::BasicPostProcess(BasicPostProcess&&) noexcept = default;
 BasicPostProcess& BasicPostProcess::operator= (BasicPostProcess&&) noexcept = default;
 BasicPostProcess::~BasicPostProcess() = default;
 
 
 // IPostProcess methods.
-void BasicPostProcess::Process(
-    _In_ ID3D11DeviceContext* deviceContext,
-    _In_ std::function<void __cdecl()> setCustomState)
+void BasicPostProcess::Process(_In_ ID3D12GraphicsCommandList* commandList)
 {
-    pImpl->Process(deviceContext, setCustomState);
-}
-
-
-// Shader control.
-void BasicPostProcess::SetEffect(Effect fx)
-{
-    if (fx >= Effect_Max)
-        throw std::invalid_argument("Effect not defined");
-
-    pImpl->fx = fx;
-
-    switch (fx)
-    {
-    case Copy:
-    case Monochrome:
-    case Sepia:
-        // These shaders don't use the constant buffer
-        pImpl->SetConstants(false);
-        break;
-
-    default:
-        pImpl->SetConstants(true);
-        break;
-    }
+    pImpl->Process(commandList);
 }
 
 
 // Properties
-void BasicPostProcess::SetSourceTexture(_In_opt_ ID3D11ShaderResourceView* value)
+void BasicPostProcess::SetSourceTexture(D3D12_GPU_DESCRIPTOR_HANDLE srvDescriptor, _In_opt_ ID3D12Resource* resource)
 {
-    pImpl->texture = value;
+    pImpl->texture = srvDescriptor;
 
-    if (value)
+    if (resource)
     {
-        ComPtr<ID3D11Resource> res;
-        value->GetResource(res.GetAddressOf());
-
-        D3D11_RESOURCE_DIMENSION resType = D3D11_RESOURCE_DIMENSION_UNKNOWN;
-        res->GetType(&resType);
-
-        switch (resType)
-        {
-        case D3D11_RESOURCE_DIMENSION_TEXTURE1D:
-            {
-                ComPtr<ID3D11Texture1D> tex;
-                ThrowIfFailed(res.As(&tex));
-
-                D3D11_TEXTURE1D_DESC desc = {};
-                tex->GetDesc(&desc);
-                pImpl->texWidth = desc.Width;
-                pImpl->texHeight = 1;
-                break;
-            }
-
-        case D3D11_RESOURCE_DIMENSION_TEXTURE2D:
-            {
-                ComPtr<ID3D11Texture2D> tex;
-                ThrowIfFailed(res.As(&tex));
-
-                D3D11_TEXTURE2D_DESC desc = {};
-                tex->GetDesc(&desc);
-                pImpl->texWidth = desc.Width;
-                pImpl->texHeight = desc.Height;
-                break;
-            }
-
-        case D3D11_RESOURCE_DIMENSION_UNKNOWN:
-        case D3D11_RESOURCE_DIMENSION_BUFFER:
-        case D3D11_RESOURCE_DIMENSION_TEXTURE3D:
-        default:
-            throw std::invalid_argument("Unsupported texture type");
-        }
+    #if defined(_MSC_VER) || !defined(_WIN32)
+        const auto desc = resource->GetDesc();
+    #else
+        D3D12_RESOURCE_DESC tmpDesc;
+        const auto& desc = *resource->GetDesc(&tmpDesc);
+    #endif
+        pImpl->texWidth = static_cast<unsigned>(desc.Width);
+        pImpl->texHeight = desc.Height;
     }
     else
     {

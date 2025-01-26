@@ -4,16 +4,18 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 //
-// http://go.microsoft.com/fwlink/?LinkId=248929
+// http://go.microsoft.com/fwlink/?LinkID=615561
 //--------------------------------------------------------------------------------------
 
 #include "pch.h"
 #include "Model.h"
-#include "DirectXHelpers.h"
+
 #include "Effects.h"
 #include "VertexTypes.h"
-#include "BinaryReader.h"
+
+#include "DirectXHelpers.h"
 #include "PlatformHelpers.h"
+#include "BinaryReader.h"
 
 #include "vbo.h"
 
@@ -35,9 +37,8 @@ namespace
         UNREFERENCED_PARAMETER(Parameter);
         UNREFERENCED_PARAMETER(lpContext);
 
-        g_vbdecl = std::make_shared<ModelMeshPart::InputLayoutCollection>(
-            VertexPositionNormalTexture::InputElements,
-            VertexPositionNormalTexture::InputElements + VertexPositionNormalTexture::InputElementCount);
+        g_vbdecl = std::make_shared<ModelMeshPart::InputLayoutCollection>(VertexPositionNormalTexture::InputLayout.pInputElementDescs,
+            VertexPositionNormalTexture::InputLayout.pInputElementDescs + VertexPositionNormalTexture::InputLayout.NumElements);
 
         return TRUE;
     }
@@ -47,16 +48,15 @@ namespace
 //--------------------------------------------------------------------------------------
 _Use_decl_annotations_
 std::unique_ptr<Model> DirectX::Model::CreateFromVBO(
-    ID3D11Device* device,
+    ID3D12Device* device,
     const uint8_t* meshData, size_t dataSize,
-    std::shared_ptr<IEffect> ieffect,
     ModelLoaderFlags flags)
 {
     if (!InitOnceExecuteOnce(&g_InitOnce, InitializeDecl, nullptr, nullptr))
         throw std::system_error(std::error_code(static_cast<int>(GetLastError()), std::system_category()), "InitOnceExecuteOnce");
 
-    if (!device || !meshData)
-        throw std::invalid_argument("Device and meshData cannot be null");
+    if (!meshData)
+        throw std::invalid_argument("meshData cannot be null");
 
     // File Header
     if (dataSize < sizeof(VBO::header_t))
@@ -67,14 +67,13 @@ std::unique_ptr<Model> DirectX::Model::CreateFromVBO(
         throw std::runtime_error("No vertices or indices found");
 
     uint64_t sizeInBytes = uint64_t(header->numVertices) * sizeof(VertexPositionNormalTexture);
-
     if (sizeInBytes > UINT32_MAX)
         throw std::runtime_error("VB too large");
 
     if (!(flags & ModelLoader_AllowLargeModels))
     {
-        if (sizeInBytes > uint64_t(D3D11_REQ_RESOURCE_SIZE_IN_MEGABYTES_EXPRESSION_A_TERM * 1024u * 1024u))
-            throw std::runtime_error("VB too large for DirectX 11");
+        if (sizeInBytes > uint64_t(D3D12_REQ_RESOURCE_SIZE_IN_MEGABYTES_EXPRESSION_A_TERM * 1024u * 1024u))
+            throw std::runtime_error("VB too large for DirectX 12");
     }
 
     auto const vertSize = static_cast<size_t>(sizeInBytes);
@@ -84,14 +83,13 @@ std::unique_ptr<Model> DirectX::Model::CreateFromVBO(
     auto verts = reinterpret_cast<const VertexPositionNormalTexture*>(meshData + sizeof(VBO::header_t));
 
     sizeInBytes = uint64_t(header->numIndices) * sizeof(uint16_t);
-
     if (sizeInBytes > UINT32_MAX)
         throw std::runtime_error("IB too large");
 
     if (!(flags & ModelLoader_AllowLargeModels))
     {
-        if (sizeInBytes > uint64_t(D3D11_REQ_RESOURCE_SIZE_IN_MEGABYTES_EXPRESSION_A_TERM * 1024u * 1024u))
-            throw std::runtime_error("IB too large for DirectX 11");
+        if (sizeInBytes > uint64_t(D3D12_REQ_RESOURCE_SIZE_IN_MEGABYTES_EXPRESSION_A_TERM * 1024u * 1024u))
+            throw std::runtime_error("IB too large for DirectX 12");
     }
 
     auto const indexSize = static_cast<size_t>(sizeInBytes);
@@ -101,73 +99,29 @@ std::unique_ptr<Model> DirectX::Model::CreateFromVBO(
     auto indices = reinterpret_cast<const uint16_t*>(meshData + sizeof(VBO::header_t) + vertSize);
 
     // Create vertex buffer
-    ComPtr<ID3D11Buffer> vb;
-    {
-        D3D11_BUFFER_DESC desc = {};
-        desc.Usage = D3D11_USAGE_DEFAULT;
-        desc.ByteWidth = static_cast<UINT>(vertSize);
-        desc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
-
-        D3D11_SUBRESOURCE_DATA initData = { verts, 0, 0 };
-
-        ThrowIfFailed(
-            device->CreateBuffer(&desc, &initData, vb.GetAddressOf())
-        );
-
-        SetDebugObjectName(vb.Get(), "ModelVBO");
-    }
+    auto vb = GraphicsMemory::Get(device).Allocate(vertSize, 16, GraphicsMemory::TAG_VERTEX);
+    memcpy(vb.Memory(), verts, vertSize);
 
     // Create index buffer
-    ComPtr<ID3D11Buffer> ib;
-    {
-        D3D11_BUFFER_DESC desc = {};
-        desc.Usage = D3D11_USAGE_DEFAULT;
-        desc.ByteWidth = static_cast<UINT>(indexSize);
-        desc.BindFlags = D3D11_BIND_INDEX_BUFFER;
+    auto ib = GraphicsMemory::Get(device).Allocate(indexSize, 16, GraphicsMemory::TAG_INDEX);
+    memcpy(ib.Memory(), indices, indexSize);
 
-        D3D11_SUBRESOURCE_DATA initData = { indices, 0, 0 };
-
-        ThrowIfFailed(
-            device->CreateBuffer(&desc, &initData, ib.GetAddressOf())
-        );
-
-        SetDebugObjectName(ib.Get(), "ModelVBO");
-    }
-
-    // Create input layout and effect
-    if (!ieffect)
-    {
-        auto effect = std::make_shared<BasicEffect>(device);
-        effect->EnableDefaultLighting();
-        effect->SetLightingEnabled(true);
-
-        ieffect = effect;
-    }
-
-    ComPtr<ID3D11InputLayout> il;
-
-    ThrowIfFailed(
-        CreateInputLayoutFromEffect<VertexPositionNormalTexture>(device, ieffect.get(), il.GetAddressOf())
-    );
-
-    SetDebugObjectName(il.Get(), "ModelVBO");
-
-    auto part = new ModelMeshPart();
+    auto part = new ModelMeshPart(0);
+    part->materialIndex = 0;
     part->indexCount = header->numIndices;
     part->startIndex = 0;
-    part->vertexStride = static_cast<UINT>(sizeof(VertexPositionNormalTexture));
-    part->inputLayout = il;
-    part->indexBuffer = ib;
-    part->vertexBuffer = vb;
-    part->effect = ieffect;
+    part->vertexStride = static_cast<uint32_t>(sizeof(VertexPositionNormalTexture));
+    part->vertexCount = header->numVertices;
+    part->indexBufferSize = static_cast<uint32_t>(indexSize);
+    part->vertexBufferSize = static_cast<uint32_t>(vertSize);
+    part->indexBuffer = std::move(ib);
+    part->vertexBuffer = std::move(vb);
     part->vbDecl = g_vbdecl;
 
     auto mesh = std::make_shared<ModelMesh>();
-    mesh->ccw = (flags & ModelLoader_CounterClockwise) != 0;
-    mesh->pmalpha = (flags & ModelLoader_PremultipledAlpha) != 0;
     BoundingSphere::CreateFromPoints(mesh->boundingSphere, header->numVertices, &verts->position, sizeof(VertexPositionNormalTexture));
     BoundingBox::CreateFromPoints(mesh->boundingBox, header->numVertices, &verts->position, sizeof(VertexPositionNormalTexture));
-    mesh->meshParts.emplace_back(part);
+    mesh->opaqueMeshParts.emplace_back(part);
 
     auto model = std::make_unique<Model>();
     model->meshes.emplace_back(mesh);
@@ -179,9 +133,8 @@ std::unique_ptr<Model> DirectX::Model::CreateFromVBO(
 //--------------------------------------------------------------------------------------
 _Use_decl_annotations_
 std::unique_ptr<Model> DirectX::Model::CreateFromVBO(
-    ID3D11Device* device,
+    ID3D12Device* device,
     const wchar_t* szFileName,
-    std::shared_ptr<IEffect> ieffect,
     ModelLoaderFlags flags)
 {
     size_t dataSize = 0;
@@ -194,7 +147,7 @@ std::unique_ptr<Model> DirectX::Model::CreateFromVBO(
         throw std::runtime_error("CreateFromVBO");
     }
 
-    auto model = CreateFromVBO(device, data.get(), dataSize, ieffect, flags);
+    auto model = CreateFromVBO(device, data.get(), dataSize, flags);
 
     model->name = szFileName;
 
@@ -209,12 +162,11 @@ std::unique_ptr<Model> DirectX::Model::CreateFromVBO(
 
 _Use_decl_annotations_
 std::unique_ptr<Model> DirectX::Model::CreateFromVBO(
-    ID3D11Device* device,
+    ID3D12Device* device,
     const __wchar_t* szFileName,
-    std::shared_ptr<IEffect> ieffect,
     ModelLoaderFlags flags)
 {
-    return Model::CreateFromVBO(device, reinterpret_cast<const unsigned short*>(szFileName), ieffect, flags);
+    return CreateFromVBO(device, reinterpret_cast<const unsigned short*>(szFileName), flags);
 }
 
 #endif

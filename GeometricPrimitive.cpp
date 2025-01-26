@@ -4,27 +4,28 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 //
-// http://go.microsoft.com/fwlink/?LinkId=248929
+// http://go.microsoft.com/fwlink/?LinkID=615561
 //--------------------------------------------------------------------------------------
 
 #include "pch.h"
 #include "GeometricPrimitive.h"
-#include "BufferHelpers.h"
+
 #include "CommonStates.h"
 #include "DirectXHelpers.h"
 #include "Effects.h"
 #include "Geometry.h"
-#include "SharedResourcePool.h"
+#include "GraphicsMemory.h"
+#include "PlatformHelpers.h"
+#include "ResourceUploadBatch.h"
 
 using namespace DirectX;
 using Microsoft::WRL::ComPtr;
-
 
 // Internal GeometricPrimitive implementation class.
 class GeometricPrimitive::Impl
 {
 public:
-    Impl() noexcept : mIndexCount(0) {}
+    Impl() noexcept : mIndexCount(0), mVertexBufferView{}, mIndexBufferView{} {}
 
     Impl(const Impl&) = delete;
     Impl& operator=(const Impl&) = delete;
@@ -32,322 +33,207 @@ public:
     Impl(Impl&&) = default;
     Impl& operator=(Impl&&) = default;
 
-    void Initialize(_In_ ID3D11DeviceContext* deviceContext, const VertexCollection& vertices, const IndexCollection& indices);
+    void Initialize(const VertexCollection& vertices, const IndexCollection& indices, _In_opt_ ID3D12Device* device);
 
-    void XM_CALLCONV Draw(FXMMATRIX world, CXMMATRIX view, CXMMATRIX projection,
-        FXMVECTOR color,
-        _In_opt_ ID3D11ShaderResourceView* texture,
-        bool wireframe,
-        const std::function<void()>& setCustomState) const;
+    void LoadStaticBuffers(
+        _In_ ID3D12Device* device,
+        ResourceUploadBatch& resourceUploadBatch);
 
-    void Draw(_In_ IEffect* effect,
-        _In_ ID3D11InputLayout* inputLayout,
-        bool alpha, bool wireframe,
-        const std::function<void()>& setCustomState) const;
+    void Transition(
+        _In_ ID3D12GraphicsCommandList* commandList,
+        D3D12_RESOURCE_STATES stateBeforeVB,
+        D3D12_RESOURCE_STATES stateAfterVB,
+        D3D12_RESOURCE_STATES stateBeforeIB,
+        D3D12_RESOURCE_STATES stateAfterIB);
 
-    void DrawInstanced(_In_ IEffect* effect,
-        _In_ ID3D11InputLayout* inputLayout,
-        uint32_t instanceCount,
-        bool alpha, bool wireframe,
-        uint32_t startInstanceLocation,
-        const std::function<void()>& setCustomState) const;
+    void DrawInstanced(_In_ ID3D12GraphicsCommandList* commandList, uint32_t instanceCount, uint32_t startInstanceLocation) const;
 
-    void CreateInputLayout(_In_ IEffect* effect, _Outptr_ ID3D11InputLayout** inputLayout) const;
-
-private:
-    ComPtr<ID3D11Buffer> mVertexBuffer;
-    ComPtr<ID3D11Buffer> mIndexBuffer;
-
-    UINT mIndexCount;
-
-    // Only one of these helpers is allocated per D3D device context, even if there are multiple GeometricPrimitive instances.
-    class SharedResources
-    {
-    public:
-        SharedResources(_In_ ID3D11DeviceContext* deviceContext);
-
-        void PrepareForRendering(bool alpha, bool wireframe) const;
-
-        ComPtr<ID3D11DeviceContext> mDeviceContext;
-        std::unique_ptr<BasicEffect> effect;
-
-        ComPtr<ID3D11InputLayout> inputLayoutTextured;
-        ComPtr<ID3D11InputLayout> inputLayoutUntextured;
-
-        std::unique_ptr<CommonStates> stateObjects;
-    };
-
-
-    // Per-device-context data.
-    std::shared_ptr<SharedResources> mResources;
-
-    static SharedResourcePool<ID3D11DeviceContext*, SharedResources> sharedResourcesPool;
+    UINT                        mIndexCount;
+    SharedGraphicsResource      mIndexBuffer;
+    SharedGraphicsResource      mVertexBuffer;
+    ComPtr<ID3D12Resource>      mStaticIndexBuffer;
+    ComPtr<ID3D12Resource>      mStaticVertexBuffer;
+    D3D12_VERTEX_BUFFER_VIEW    mVertexBufferView;
+    D3D12_INDEX_BUFFER_VIEW     mIndexBufferView;
 };
 
 
-// Global pool of per-device-context GeometricPrimitive resources.
-SharedResourcePool<ID3D11DeviceContext*, GeometricPrimitive::Impl::SharedResources> GeometricPrimitive::Impl::sharedResourcesPool;
-
-
-// Per-device-context constructor.
-GeometricPrimitive::Impl::SharedResources::SharedResources(_In_ ID3D11DeviceContext* deviceContext)
-    : mDeviceContext(deviceContext)
-{
-    ComPtr<ID3D11Device> device;
-    deviceContext->GetDevice(&device);
-
-    // Create the BasicEffect.
-    effect = std::make_unique<BasicEffect>(device.Get());
-
-    effect->EnableDefaultLighting();
-
-    // Create state objects.
-    stateObjects = std::make_unique<CommonStates>(device.Get());
-
-    // Create input layouts.
-    effect->SetTextureEnabled(true);
-    ThrowIfFailed(
-        CreateInputLayoutFromEffect<VertexType>(device.Get(), effect.get(), &inputLayoutTextured)
-    );
-
-    SetDebugObjectName(inputLayoutTextured.Get(), "DirectXTK:GeometricPrimitive");
-
-    effect->SetTextureEnabled(false);
-    ThrowIfFailed(
-        CreateInputLayoutFromEffect<VertexType>(device.Get(), effect.get(), &inputLayoutUntextured)
-    );
-
-    SetDebugObjectName(inputLayoutUntextured.Get(), "DirectXTK:GeometricPrimitive");
-}
-
-
-// Sets up D3D device state ready for drawing a primitive.
-void GeometricPrimitive::Impl::SharedResources::PrepareForRendering(bool alpha, bool wireframe) const
-{
-    // Set the blend and depth stencil state.
-    ID3D11BlendState* blendState;
-    ID3D11DepthStencilState* depthStencilState;
-
-    if (alpha)
-    {
-        // Alpha blended rendering.
-        blendState = stateObjects->AlphaBlend();
-        depthStencilState = s_reversez ? stateObjects->DepthReadReverseZ() : stateObjects->DepthRead();
-    }
-    else
-    {
-        // Opaque rendering.
-        blendState = stateObjects->Opaque();
-        depthStencilState = s_reversez ? stateObjects->DepthReverseZ() : stateObjects->DepthDefault();
-    }
-
-    mDeviceContext->OMSetBlendState(blendState, nullptr, 0xFFFFFFFF);
-    mDeviceContext->OMSetDepthStencilState(depthStencilState, 0);
-
-    // Set the rasterizer state.
-    if (wireframe)
-        mDeviceContext->RSSetState(stateObjects->Wireframe());
-    else
-        mDeviceContext->RSSetState(stateObjects->CullCounterClockwise());
-
-    ID3D11SamplerState* samplerState = stateObjects->LinearWrap();
-
-    mDeviceContext->PSSetSamplers(0, 1, &samplerState);
-}
-
-
 // Initializes a geometric primitive instance that will draw the specified vertex and index data.
-_Use_decl_annotations_
-void GeometricPrimitive::Impl::Initialize(ID3D11DeviceContext* deviceContext, const VertexCollection& vertices, const IndexCollection& indices)
+void GeometricPrimitive::Impl::Initialize(
+    const VertexCollection& vertices,
+    const IndexCollection& indices,
+    _In_opt_ ID3D12Device* device)
 {
     if (vertices.size() >= USHRT_MAX)
-        throw std::out_of_range("Too many vertices for 16-bit index buffer");
+        throw std::invalid_argument("Too many vertices for 16-bit index buffer");
 
     if (indices.size() > UINT32_MAX)
-        throw std::out_of_range("Too many indices");
+        throw std::invalid_argument("Too many indices");
 
-    mResources = sharedResourcesPool.DemandCreate(deviceContext);
+    // Vertex data
+    uint64_t sizeInBytes = uint64_t(vertices.size()) * sizeof(vertices[0]);
+    if (sizeInBytes > uint64_t(D3D12_REQ_RESOURCE_SIZE_IN_MEGABYTES_EXPRESSION_A_TERM * 1024u * 1024u))
+        throw std::invalid_argument("VB too large for DirectX 12");
 
-    ComPtr<ID3D11Device> device;
-    deviceContext->GetDevice(&device);
+    auto const vertSizeBytes = static_cast<size_t>(sizeInBytes);
 
-    ThrowIfFailed(
-        CreateStaticBuffer(device.Get(), vertices, D3D11_BIND_VERTEX_BUFFER, mVertexBuffer.ReleaseAndGetAddressOf())
-    );
+    mVertexBuffer = GraphicsMemory::Get(device).Allocate(vertSizeBytes, 16, GraphicsMemory::TAG_VERTEX);
 
-    ThrowIfFailed(
-        CreateStaticBuffer(device.Get(), indices, D3D11_BIND_INDEX_BUFFER, mIndexBuffer.ReleaseAndGetAddressOf())
-    );
+    auto verts = reinterpret_cast<const uint8_t*>(vertices.data());
+    memcpy(mVertexBuffer.Memory(), verts, vertSizeBytes);
 
-    SetDebugObjectName(mVertexBuffer.Get(), "DirectXTK:GeometricPrimitive");
-    SetDebugObjectName(mIndexBuffer.Get(), "DirectXTK:GeometricPrimitive");
+    // Index data
+    sizeInBytes = uint64_t(indices.size()) * sizeof(indices[0]);
+    if (sizeInBytes > uint64_t(D3D12_REQ_RESOURCE_SIZE_IN_MEGABYTES_EXPRESSION_A_TERM * 1024u * 1024u))
+        throw std::invalid_argument("IB too large for DirectX 12");
 
+    auto const indSizeBytes = static_cast<size_t>(sizeInBytes);
+
+    mIndexBuffer = GraphicsMemory::Get(device).Allocate(indSizeBytes, 16, GraphicsMemory::TAG_INDEX);
+
+    auto ind = reinterpret_cast<const uint8_t*>(indices.data());
+    memcpy(mIndexBuffer.Memory(), ind, indSizeBytes);
+
+    // Record index count for draw
     mIndexCount = static_cast<UINT>(indices.size());
+
+    // Create views
+    mVertexBufferView.BufferLocation = mVertexBuffer.GpuAddress();
+    mVertexBufferView.StrideInBytes = static_cast<UINT>(sizeof(VertexCollection::value_type));
+    mVertexBufferView.SizeInBytes = static_cast<UINT>(mVertexBuffer.Size());
+
+    mIndexBufferView.BufferLocation = mIndexBuffer.GpuAddress();
+    mIndexBufferView.SizeInBytes = static_cast<UINT>(mIndexBuffer.Size());
+    mIndexBufferView.Format = DXGI_FORMAT_R16_UINT;
+}
+
+
+// Load VB/IB resources for static geometry.
+_Use_decl_annotations_
+void GeometricPrimitive::Impl::LoadStaticBuffers(
+    ID3D12Device* device,
+    ResourceUploadBatch& resourceUploadBatch)
+{
+    const CD3DX12_HEAP_PROPERTIES heapProperties(D3D12_HEAP_TYPE_DEFAULT);
+
+    // Convert dynamic VB to static VB
+    if (!mStaticVertexBuffer)
+    {
+        assert(mVertexBuffer);
+
+        auto const desc = CD3DX12_RESOURCE_DESC::Buffer(mVertexBuffer.Size());
+
+        ThrowIfFailed(device->CreateCommittedResource(
+            &heapProperties,
+            D3D12_HEAP_FLAG_NONE,
+            &desc,
+            c_initialCopyTargetState,
+            nullptr,
+            IID_GRAPHICS_PPV_ARGS(mStaticVertexBuffer.GetAddressOf())
+        ));
+
+        SetDebugObjectName(mStaticVertexBuffer.Get(), L"GeometricPrimitive");
+
+        resourceUploadBatch.Upload(mStaticVertexBuffer.Get(), mVertexBuffer);
+
+        resourceUploadBatch.Transition(mStaticVertexBuffer.Get(),
+            D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
+
+        // Update view
+        mVertexBufferView.BufferLocation = mStaticVertexBuffer->GetGPUVirtualAddress();
+
+        mVertexBuffer.Reset();
+    }
+
+    // Convert dynamic IB to static IB
+    if (!mStaticIndexBuffer)
+    {
+        assert(mIndexBuffer);
+
+        auto const desc = CD3DX12_RESOURCE_DESC::Buffer(mIndexBuffer.Size());
+
+        ThrowIfFailed(device->CreateCommittedResource(
+            &heapProperties,
+            D3D12_HEAP_FLAG_NONE,
+            &desc,
+            c_initialCopyTargetState,
+            nullptr,
+            IID_GRAPHICS_PPV_ARGS(mStaticIndexBuffer.GetAddressOf())
+        ));
+
+        SetDebugObjectName(mStaticIndexBuffer.Get(), L"GeometricPrimitive");
+
+        resourceUploadBatch.Upload(mStaticIndexBuffer.Get(), mIndexBuffer);
+
+        resourceUploadBatch.Transition(mStaticIndexBuffer.Get(),
+            D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_INDEX_BUFFER);
+
+        // Update view
+        mIndexBufferView.BufferLocation = mStaticIndexBuffer->GetGPUVirtualAddress();
+
+        mIndexBuffer.Reset();
+    }
+}
+
+
+// Transition VB/IB resources for static geometry.
+_Use_decl_annotations_
+void GeometricPrimitive::Impl::Transition(
+    ID3D12GraphicsCommandList* commandList,
+    D3D12_RESOURCE_STATES stateBeforeVB,
+    D3D12_RESOURCE_STATES stateAfterVB,
+    D3D12_RESOURCE_STATES stateBeforeIB,
+    D3D12_RESOURCE_STATES stateAfterIB)
+{
+    UINT start = 0;
+    UINT count = 0;
+
+    D3D12_RESOURCE_BARRIER barrier[2] = {};
+    barrier[0].Type = barrier[1].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+    barrier[0].Transition.Subresource = barrier[1].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+    barrier[0].Transition.pResource = mStaticIndexBuffer.Get();
+    barrier[0].Transition.StateBefore = stateBeforeIB;
+    barrier[0].Transition.StateAfter = stateAfterIB;
+
+    barrier[1].Transition.pResource = mStaticVertexBuffer.Get();
+    barrier[1].Transition.StateBefore = stateBeforeVB;
+    barrier[1].Transition.StateAfter = stateAfterVB;
+
+    if (stateBeforeIB == stateAfterIB || !mStaticIndexBuffer)
+    {
+        ++start;
+    }
+    else
+    {
+        ++count;
+    }
+
+    if (stateBeforeVB != stateAfterVB && mStaticVertexBuffer)
+    {
+        ++count;
+    }
+
+    if (count > 0)
+    {
+        commandList->ResourceBarrier(count, &barrier[start]);
+    }
 }
 
 
 // Draws the primitive.
 _Use_decl_annotations_
-void XM_CALLCONV GeometricPrimitive::Impl::Draw(
-    FXMMATRIX world,
-    CXMMATRIX view,
-    CXMMATRIX projection,
-    FXMVECTOR color,
-    ID3D11ShaderResourceView* texture,
-    bool wireframe,
-    const std::function<void()>& setCustomState) const
+void GeometricPrimitive::Impl::DrawInstanced(ID3D12GraphicsCommandList* commandList, uint32_t instanceCount, uint32_t startInstanceLocation) const
 {
-    assert(mResources);
-    auto effect = mResources->effect.get();
-    assert(effect != nullptr);
+    commandList->IASetVertexBuffers(0, 1, &mVertexBufferView);
+    commandList->IASetIndexBuffer(&mIndexBufferView);
+    commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 
-    ID3D11InputLayout *inputLayout;
-    if (texture)
-    {
-        effect->SetTextureEnabled(true);
-        effect->SetTexture(texture);
-
-        inputLayout = mResources->inputLayoutTextured.Get();
-    }
-    else
-    {
-        effect->SetTextureEnabled(false);
-
-        inputLayout = mResources->inputLayoutUntextured.Get();
-    }
-
-    // Set effect parameters.
-    effect->SetMatrices(world, view, projection);
-
-    effect->SetColorAndAlpha(color);
-
-    const float alpha = XMVectorGetW(color);
-    Draw(effect, inputLayout, (alpha < 1.f), wireframe, setCustomState);
+    commandList->DrawIndexedInstanced(mIndexCount, instanceCount, 0, 0, startInstanceLocation);
 }
-
-
-// Draw the primitive using a custom effect.
-_Use_decl_annotations_
-void GeometricPrimitive::Impl::Draw(
-    IEffect* effect,
-    ID3D11InputLayout* inputLayout,
-    bool alpha,
-    bool wireframe,
-    const std::function<void()>& setCustomState) const
-{
-    assert(mResources);
-    auto deviceContext = mResources->mDeviceContext.Get();
-    assert(deviceContext != nullptr);
-
-    // Set state objects.
-    mResources->PrepareForRendering(alpha, wireframe);
-
-    // Set input layout.
-    assert(inputLayout != nullptr);
-    deviceContext->IASetInputLayout(inputLayout);
-
-    // Activate our shaders, constant buffers, texture, etc.
-    assert(effect != nullptr);
-    effect->Apply(deviceContext);
-
-    // Set the vertex and index buffer.
-    auto vertexBuffer = mVertexBuffer.Get();
-    constexpr UINT vertexStride = sizeof(VertexType);
-    constexpr UINT vertexOffset = 0;
-
-    deviceContext->IASetVertexBuffers(0, 1, &vertexBuffer, &vertexStride, &vertexOffset);
-
-    deviceContext->IASetIndexBuffer(mIndexBuffer.Get(), DXGI_FORMAT_R16_UINT, 0);
-
-    // Hook lets the caller replace our shaders or state settings with whatever else they see fit.
-    if (setCustomState)
-    {
-        setCustomState();
-    }
-
-    // Draw the primitive.
-    deviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-
-    deviceContext->DrawIndexed(mIndexCount, 0, 0);
-}
-
-_Use_decl_annotations_
-void GeometricPrimitive::Impl::DrawInstanced(
-    IEffect* effect,
-    ID3D11InputLayout* inputLayout,
-    uint32_t instanceCount,
-    bool alpha,
-    bool wireframe,
-    uint32_t startInstanceLocation,
-    const std::function<void()>& setCustomState) const
-{
-    assert(mResources);
-    auto deviceContext = mResources->mDeviceContext.Get();
-    assert(deviceContext != nullptr);
-
-    // Set state objects.
-    mResources->PrepareForRendering(alpha, wireframe);
-
-    // Set input layout.
-    assert(inputLayout != nullptr);
-    deviceContext->IASetInputLayout(inputLayout);
-
-    // Activate our shaders, constant buffers, texture, etc.
-    assert(effect != nullptr);
-    effect->Apply(deviceContext);
-
-    // Set the vertex and index buffer.
-    auto vertexBuffer = mVertexBuffer.Get();
-    constexpr UINT vertexStride = sizeof(VertexType);
-    constexpr UINT vertexOffset = 0;
-
-    deviceContext->IASetVertexBuffers(0, 1, &vertexBuffer, &vertexStride, &vertexOffset);
-
-    deviceContext->IASetIndexBuffer(mIndexBuffer.Get(), DXGI_FORMAT_R16_UINT, 0);
-
-    // Hook lets the caller replace our shaders or state settings with whatever else they see fit.
-    if (setCustomState)
-    {
-        setCustomState();
-    }
-
-    // Draw the primitive.
-    deviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-
-    deviceContext->DrawIndexedInstanced(mIndexCount, instanceCount, 0, 0, startInstanceLocation);
-}
-
-
-// Create input layout for drawing with a custom effect.
-_Use_decl_annotations_
-void GeometricPrimitive::Impl::CreateInputLayout(IEffect* effect, ID3D11InputLayout** inputLayout) const
-{
-    assert(effect != nullptr);
-    assert(inputLayout != nullptr);
-
-    assert(mResources);
-    auto deviceContext = mResources->mDeviceContext.Get();
-    assert(deviceContext != nullptr);
-
-    ComPtr<ID3D11Device> device;
-    deviceContext->GetDevice(&device);
-
-    ThrowIfFailed(
-        CreateInputLayoutFromEffect<VertexType>(device.Get(), effect, inputLayout)
-    );
-
-    assert(inputLayout != nullptr && *inputLayout != nullptr);
-    _Analysis_assume_(inputLayout != nullptr && *inputLayout != nullptr);
-
-    SetDebugObjectName(*inputLayout, "DirectXTK:GeometricPrimitive");
-}
-
 
 //--------------------------------------------------------------------------------------
 // GeometricPrimitive
 //--------------------------------------------------------------------------------------
-
-bool GeometricPrimitive::s_reversez = false;
 
 // Constructor.
 GeometricPrimitive::GeometricPrimitive() noexcept(false)
@@ -364,49 +250,35 @@ GeometricPrimitive::~GeometricPrimitive()
 
 // Public entrypoints.
 _Use_decl_annotations_
-void XM_CALLCONV GeometricPrimitive::Draw(
-    FXMMATRIX world,
-    CXMMATRIX view,
-    CXMMATRIX projection,
-    FXMVECTOR color,
-    ID3D11ShaderResourceView* texture,
-    bool wireframe,
-    std::function<void()> setCustomState) const
+void GeometricPrimitive::LoadStaticBuffers(ID3D12Device* device, ResourceUploadBatch& resourceUploadBatch)
 {
-    pImpl->Draw(world, view, projection, color, texture, wireframe, setCustomState);
+    pImpl->LoadStaticBuffers(device, resourceUploadBatch);
+}
+
+
+void GeometricPrimitive::Transition(
+    _In_ ID3D12GraphicsCommandList* commandList,
+    D3D12_RESOURCE_STATES stateBeforeVB,
+    D3D12_RESOURCE_STATES stateAfterVB,
+    D3D12_RESOURCE_STATES stateBeforeIB,
+    D3D12_RESOURCE_STATES stateAfterIB)
+{
+    pImpl->Transition(commandList, stateBeforeVB, stateAfterVB, stateBeforeIB, stateAfterIB);
+}
+
+
+
+_Use_decl_annotations_
+void GeometricPrimitive::Draw(ID3D12GraphicsCommandList* commandList) const
+{
+    pImpl->DrawInstanced(commandList, 1, 0);
 }
 
 
 _Use_decl_annotations_
-void GeometricPrimitive::Draw(
-    IEffect* effect,
-    ID3D11InputLayout* inputLayout,
-    bool alpha,
-    bool wireframe,
-    std::function<void()> setCustomState) const
+void GeometricPrimitive::DrawInstanced(ID3D12GraphicsCommandList* commandList, uint32_t instanceCount, uint32_t startInstanceLocation) const
 {
-    pImpl->Draw(effect, inputLayout, alpha, wireframe, setCustomState);
-}
-
-
-_Use_decl_annotations_
-void GeometricPrimitive::DrawInstanced(
-    IEffect* effect,
-    ID3D11InputLayout* inputLayout,
-    uint32_t instanceCount,
-    bool alpha,
-    bool wireframe,
-    uint32_t startInstanceLocation,
-    std::function<void()> setCustomState) const
-{
-    pImpl->DrawInstanced(effect, inputLayout, instanceCount, alpha, wireframe, startInstanceLocation, setCustomState);
-}
-
-
-_Use_decl_annotations_
-void GeometricPrimitive::CreateInputLayout(IEffect* effect, ID3D11InputLayout** inputLayout) const
-{
-    pImpl->CreateInputLayout(effect, inputLayout);
+    pImpl->DrawInstanced(commandList, instanceCount, startInstanceLocation);
 }
 
 
@@ -414,11 +286,11 @@ void GeometricPrimitive::CreateInputLayout(IEffect* effect, ID3D11InputLayout** 
 // Cube (aka a Hexahedron) or Box
 //--------------------------------------------------------------------------------------
 
-_Use_decl_annotations_
+// Creates a cube primitive.
 std::unique_ptr<GeometricPrimitive> GeometricPrimitive::CreateCube(
-    ID3D11DeviceContext* deviceContext,
     float size,
-    bool rhcoords)
+    bool rhcoords,
+    _In_opt_ ID3D12Device* device)
 {
     VertexCollection vertices;
     IndexCollection indices;
@@ -427,7 +299,7 @@ std::unique_ptr<GeometricPrimitive> GeometricPrimitive::CreateCube(
     // Create the primitive object.
     std::unique_ptr<GeometricPrimitive> primitive(new GeometricPrimitive());
 
-    primitive->pImpl->Initialize(deviceContext, vertices, indices);
+    primitive->pImpl->Initialize(vertices, indices, device);
 
     return primitive;
 }
@@ -443,12 +315,11 @@ void GeometricPrimitive::CreateCube(
 
 
 // Creates a box primitive.
-_Use_decl_annotations_
 std::unique_ptr<GeometricPrimitive> GeometricPrimitive::CreateBox(
-    ID3D11DeviceContext* deviceContext,
     const XMFLOAT3& size,
     bool rhcoords,
-    bool invertn)
+    bool invertn,
+    _In_opt_ ID3D12Device* device)
 {
     VertexCollection vertices;
     IndexCollection indices;
@@ -457,7 +328,7 @@ std::unique_ptr<GeometricPrimitive> GeometricPrimitive::CreateBox(
     // Create the primitive object.
     std::unique_ptr<GeometricPrimitive> primitive(new GeometricPrimitive());
 
-    primitive->pImpl->Initialize(deviceContext, vertices, indices);
+    primitive->pImpl->Initialize(vertices, indices, device);
 
     return primitive;
 }
@@ -477,22 +348,23 @@ void GeometricPrimitive::CreateBox(
 // Sphere
 //--------------------------------------------------------------------------------------
 
-_Use_decl_annotations_
+// Creates a sphere primitive.
 std::unique_ptr<GeometricPrimitive> GeometricPrimitive::CreateSphere(
-    ID3D11DeviceContext* deviceContext,
     float diameter,
     size_t tessellation,
     bool rhcoords,
-    bool invertn)
+    bool invertn,
+    _In_opt_ ID3D12Device* device)
 {
-    VertexCollection vertices;
-    IndexCollection indices;
-    ComputeSphere(vertices, indices, diameter, tessellation, rhcoords, invertn);
-
     // Create the primitive object.
     std::unique_ptr<GeometricPrimitive> primitive(new GeometricPrimitive());
 
-    primitive->pImpl->Initialize(deviceContext, vertices, indices);
+    VertexCollection vertices;
+    IndexCollection indices;
+
+    ComputeSphere(vertices, indices, diameter, tessellation, rhcoords, invertn);
+
+    primitive->pImpl->Initialize(vertices, indices, device);
 
     return primitive;
 }
@@ -513,21 +385,21 @@ void GeometricPrimitive::CreateSphere(
 // Geodesic sphere
 //--------------------------------------------------------------------------------------
 
-_Use_decl_annotations_
+// Creates a geosphere primitive.
 std::unique_ptr<GeometricPrimitive> GeometricPrimitive::CreateGeoSphere(
-    ID3D11DeviceContext* deviceContext,
     float diameter,
     size_t tessellation,
-    bool rhcoords)
+    bool rhcoords,
+    _In_opt_ ID3D12Device* device)
 {
+    // Create the primitive object.
+    std::unique_ptr<GeometricPrimitive> primitive(new GeometricPrimitive());
+
     VertexCollection vertices;
     IndexCollection indices;
     ComputeGeoSphere(vertices, indices, diameter, tessellation, rhcoords);
 
-    // Create the primitive object.
-    std::unique_ptr<GeometricPrimitive> primitive(new GeometricPrimitive());
-
-    primitive->pImpl->Initialize(deviceContext, vertices, indices);
+    primitive->pImpl->Initialize(vertices, indices, device);
 
     return primitive;
 }
@@ -536,7 +408,8 @@ void GeometricPrimitive::CreateGeoSphere(
     VertexCollection& vertices,
     IndexCollection& indices,
     float diameter,
-    size_t tessellation, bool rhcoords)
+    size_t tessellation,
+    bool rhcoords)
 {
     ComputeGeoSphere(vertices, indices, diameter, tessellation, rhcoords);
 }
@@ -547,22 +420,21 @@ void GeometricPrimitive::CreateGeoSphere(
 //--------------------------------------------------------------------------------------
 
 // Creates a cylinder primitive.
-_Use_decl_annotations_
 std::unique_ptr<GeometricPrimitive> GeometricPrimitive::CreateCylinder(
-    ID3D11DeviceContext* deviceContext,
     float height,
     float diameter,
     size_t tessellation,
-    bool rhcoords)
+    bool rhcoords,
+    _In_opt_ ID3D12Device* device)
 {
+    // Create the primitive object.
+    std::unique_ptr<GeometricPrimitive> primitive(new GeometricPrimitive());
+
     VertexCollection vertices;
     IndexCollection indices;
     ComputeCylinder(vertices, indices, height, diameter, tessellation, rhcoords);
 
-    // Create the primitive object.
-    std::unique_ptr<GeometricPrimitive> primitive(new GeometricPrimitive());
-
-    primitive->pImpl->Initialize(deviceContext, vertices, indices);
+    primitive->pImpl->Initialize(vertices, indices, device);
 
     return primitive;
 }
@@ -570,8 +442,7 @@ std::unique_ptr<GeometricPrimitive> GeometricPrimitive::CreateCylinder(
 void GeometricPrimitive::CreateCylinder(
     VertexCollection& vertices,
     IndexCollection& indices,
-    float height,
-    float diameter,
+    float height, float diameter,
     size_t tessellation,
     bool rhcoords)
 {
@@ -580,22 +451,21 @@ void GeometricPrimitive::CreateCylinder(
 
 
 // Creates a cone primitive.
-_Use_decl_annotations_
 std::unique_ptr<GeometricPrimitive> GeometricPrimitive::CreateCone(
-    ID3D11DeviceContext* deviceContext,
     float diameter,
     float height,
     size_t tessellation,
-    bool rhcoords)
+    bool rhcoords,
+    _In_opt_ ID3D12Device* device)
 {
+    // Create the primitive object.
+    std::unique_ptr<GeometricPrimitive> primitive(new GeometricPrimitive());
+
     VertexCollection vertices;
     IndexCollection indices;
     ComputeCone(vertices, indices, diameter, height, tessellation, rhcoords);
 
-    // Create the primitive object.
-    std::unique_ptr<GeometricPrimitive> primitive(new GeometricPrimitive());
-
-    primitive->pImpl->Initialize(deviceContext, vertices, indices);
+    primitive->pImpl->Initialize(vertices, indices, device);
 
     return primitive;
 }
@@ -616,22 +486,22 @@ void GeometricPrimitive::CreateCone(
 // Torus
 //--------------------------------------------------------------------------------------
 
-_Use_decl_annotations_
+// Creates a torus primitive.
 std::unique_ptr<GeometricPrimitive> GeometricPrimitive::CreateTorus(
-    ID3D11DeviceContext* deviceContext,
     float diameter,
     float thickness,
     size_t tessellation,
-    bool rhcoords)
+    bool rhcoords,
+    _In_opt_ ID3D12Device* device)
 {
+    // Create the primitive object.
+    std::unique_ptr<GeometricPrimitive> primitive(new GeometricPrimitive());
+
     VertexCollection vertices;
     IndexCollection indices;
     ComputeTorus(vertices, indices, diameter, thickness, tessellation, rhcoords);
 
-    // Create the primitive object.
-    std::unique_ptr<GeometricPrimitive> primitive(new GeometricPrimitive());
-
-    primitive->pImpl->Initialize(deviceContext, vertices, indices);
+    primitive->pImpl->Initialize(vertices, indices, device);
 
     return primitive;
 }
@@ -652,20 +522,19 @@ void GeometricPrimitive::CreateTorus(
 // Tetrahedron
 //--------------------------------------------------------------------------------------
 
-_Use_decl_annotations_
 std::unique_ptr<GeometricPrimitive> GeometricPrimitive::CreateTetrahedron(
-    ID3D11DeviceContext* deviceContext,
     float size,
-    bool rhcoords)
+    bool rhcoords,
+    _In_opt_ ID3D12Device* device)
 {
+    // Create the primitive object.
+    std::unique_ptr<GeometricPrimitive> primitive(new GeometricPrimitive());
+
     VertexCollection vertices;
     IndexCollection indices;
     ComputeTetrahedron(vertices, indices, size, rhcoords);
 
-    // Create the primitive object.
-    std::unique_ptr<GeometricPrimitive> primitive(new GeometricPrimitive());
-
-    primitive->pImpl->Initialize(deviceContext, vertices, indices);
+    primitive->pImpl->Initialize(vertices, indices, device);
 
     return primitive;
 }
@@ -684,20 +553,19 @@ void GeometricPrimitive::CreateTetrahedron(
 // Octahedron
 //--------------------------------------------------------------------------------------
 
-_Use_decl_annotations_
 std::unique_ptr<GeometricPrimitive> GeometricPrimitive::CreateOctahedron(
-    ID3D11DeviceContext* deviceContext,
     float size,
-    bool rhcoords)
+    bool rhcoords,
+    _In_opt_ ID3D12Device* device)
 {
+    // Create the primitive object.
+    std::unique_ptr<GeometricPrimitive> primitive(new GeometricPrimitive());
+
     VertexCollection vertices;
     IndexCollection indices;
     ComputeOctahedron(vertices, indices, size, rhcoords);
 
-    // Create the primitive object.
-    std::unique_ptr<GeometricPrimitive> primitive(new GeometricPrimitive());
-
-    primitive->pImpl->Initialize(deviceContext, vertices, indices);
+    primitive->pImpl->Initialize(vertices, indices, device);
 
     return primitive;
 }
@@ -716,20 +584,19 @@ void GeometricPrimitive::CreateOctahedron(
 // Dodecahedron
 //--------------------------------------------------------------------------------------
 
-_Use_decl_annotations_
 std::unique_ptr<GeometricPrimitive> GeometricPrimitive::CreateDodecahedron(
-    ID3D11DeviceContext* deviceContext,
     float size,
-    bool rhcoords)
+    bool rhcoords,
+    _In_opt_ ID3D12Device* device)
 {
+    // Create the primitive object.
+    std::unique_ptr<GeometricPrimitive> primitive(new GeometricPrimitive());
+
     VertexCollection vertices;
     IndexCollection indices;
     ComputeDodecahedron(vertices, indices, size, rhcoords);
 
-    // Create the primitive object.
-    std::unique_ptr<GeometricPrimitive> primitive(new GeometricPrimitive());
-
-    primitive->pImpl->Initialize(deviceContext, vertices, indices);
+    primitive->pImpl->Initialize(vertices, indices, device);
 
     return primitive;
 }
@@ -748,20 +615,19 @@ void GeometricPrimitive::CreateDodecahedron(
 // Icosahedron
 //--------------------------------------------------------------------------------------
 
-_Use_decl_annotations_
 std::unique_ptr<GeometricPrimitive> GeometricPrimitive::CreateIcosahedron(
-    ID3D11DeviceContext* deviceContext,
     float size,
-    bool rhcoords)
+    bool rhcoords,
+    _In_opt_ ID3D12Device* device)
 {
+    // Create the primitive object.
+    std::unique_ptr<GeometricPrimitive> primitive(new GeometricPrimitive());
+
     VertexCollection vertices;
     IndexCollection indices;
     ComputeIcosahedron(vertices, indices, size, rhcoords);
 
-    // Create the primitive object.
-    std::unique_ptr<GeometricPrimitive> primitive(new GeometricPrimitive());
-
-    primitive->pImpl->Initialize(deviceContext, vertices, indices);
+    primitive->pImpl->Initialize(vertices, indices, device);
 
     return primitive;
 }
@@ -780,21 +646,21 @@ void GeometricPrimitive::CreateIcosahedron(
 // Teapot
 //--------------------------------------------------------------------------------------
 
-_Use_decl_annotations_
+// Creates a teapot primitive.
 std::unique_ptr<GeometricPrimitive> GeometricPrimitive::CreateTeapot(
-    ID3D11DeviceContext* deviceContext,
     float size,
     size_t tessellation,
-    bool rhcoords)
+    bool rhcoords,
+    _In_opt_ ID3D12Device* device)
 {
+    // Create the primitive object.
+    std::unique_ptr<GeometricPrimitive> primitive(new GeometricPrimitive());
+
     VertexCollection vertices;
     IndexCollection indices;
     ComputeTeapot(vertices, indices, size, tessellation, rhcoords);
 
-    // Create the primitive object.
-    std::unique_ptr<GeometricPrimitive> primitive(new GeometricPrimitive());
-
-    primitive->pImpl->Initialize(deviceContext, vertices, indices);
+    primitive->pImpl->Initialize(vertices, indices, device);
 
     return primitive;
 }
@@ -802,8 +668,7 @@ std::unique_ptr<GeometricPrimitive> GeometricPrimitive::CreateTeapot(
 void GeometricPrimitive::CreateTeapot(
     VertexCollection& vertices,
     IndexCollection& indices,
-    float size,
-    size_t tessellation,
+    float size, size_t tessellation,
     bool rhcoords)
 {
     ComputeTeapot(vertices, indices, size, tessellation, rhcoords);
@@ -814,11 +679,10 @@ void GeometricPrimitive::CreateTeapot(
 // Custom
 //--------------------------------------------------------------------------------------
 
-_Use_decl_annotations_
 std::unique_ptr<GeometricPrimitive> GeometricPrimitive::CreateCustom(
-    ID3D11DeviceContext* deviceContext,
     const VertexCollection& vertices,
-    const IndexCollection& indices)
+    const IndexCollection& indices,
+    _In_opt_ ID3D12Device* device)
 {
     // Extra validation
     if (vertices.empty() || indices.empty())
@@ -829,20 +693,20 @@ std::unique_ptr<GeometricPrimitive> GeometricPrimitive::CreateCustom(
 
     const size_t nVerts = vertices.size();
     if (nVerts >= USHRT_MAX)
-        throw std::out_of_range("Too many vertices for 16-bit index buffer");
+        throw std::invalid_argument("Too many vertices for 16-bit index buffer");
 
-    for (const auto it : indices)
+    for (auto it : indices)
     {
         if (it >= nVerts)
         {
             throw std::out_of_range("Index not in vertices list");
         }
     }
-
     // Create the primitive object.
     std::unique_ptr<GeometricPrimitive> primitive(new GeometricPrimitive());
 
-    primitive->pImpl->Initialize(deviceContext, vertices, indices);
+    // copy geometry
+    primitive->pImpl->Initialize(vertices, indices, device);
 
     return primitive;
 }

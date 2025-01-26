@@ -4,382 +4,585 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 //
-// http://go.microsoft.com/fwlink/?LinkId=248929
+// http://go.microsoft.com/fwlink/?LinkID=615561
 //--------------------------------------------------------------------------------------
 
 #include "pch.h"
 #include "CommonStates.h"
-#include "DemandCreate.h"
 #include "DirectXHelpers.h"
-#include "SharedResourcePool.h"
+#include "DescriptorHeap.h"
 
 using namespace DirectX;
-using Microsoft::WRL::ComPtr;
+
+// --------------------------------------------------------------------------
+// Blend States
+// --------------------------------------------------------------------------
+
+const D3D12_BLEND_DESC CommonStates::Opaque =
+{
+    FALSE, // AlphaToCoverageEnable
+    FALSE, // IndependentBlendEnable
+    { {
+        FALSE, // BlendEnable
+        FALSE, // LogicOpEnable
+        D3D12_BLEND_ONE, // SrcBlend
+        D3D12_BLEND_ZERO, // DestBlend
+        D3D12_BLEND_OP_ADD, // BlendOp
+        D3D12_BLEND_ONE, // SrcBlendAlpha
+        D3D12_BLEND_ZERO, // DestBlendAlpha
+        D3D12_BLEND_OP_ADD, // BlendOpAlpha
+        D3D12_LOGIC_OP_NOOP,
+        D3D12_COLOR_WRITE_ENABLE_ALL
+    } }
+};
+
+const D3D12_BLEND_DESC CommonStates::AlphaBlend =
+{
+    FALSE, // AlphaToCoverageEnable
+    FALSE, // IndependentBlendEnable
+    { {
+        TRUE, // BlendEnable
+        FALSE, // LogicOpEnable
+        D3D12_BLEND_ONE, // SrcBlend
+        D3D12_BLEND_INV_SRC_ALPHA, // DestBlend
+        D3D12_BLEND_OP_ADD, // BlendOp
+        D3D12_BLEND_ONE, // SrcBlendAlpha
+        D3D12_BLEND_INV_SRC_ALPHA, // DestBlendAlpha
+        D3D12_BLEND_OP_ADD, // BlendOpAlpha
+        D3D12_LOGIC_OP_NOOP,
+        D3D12_COLOR_WRITE_ENABLE_ALL
+    } }
+};
+
+const D3D12_BLEND_DESC CommonStates::Additive =
+{
+    FALSE, // AlphaToCoverageEnable
+    FALSE, // IndependentBlendEnable
+    { {
+        TRUE, // BlendEnable
+        FALSE, // LogicOpEnable
+        D3D12_BLEND_SRC_ALPHA, // SrcBlend
+        D3D12_BLEND_ONE, // DestBlend
+        D3D12_BLEND_OP_ADD, // BlendOp
+        D3D12_BLEND_SRC_ALPHA, // SrcBlendAlpha
+        D3D12_BLEND_ONE, // DestBlendAlpha
+        D3D12_BLEND_OP_ADD, // BlendOpAlpha
+        D3D12_LOGIC_OP_NOOP,
+        D3D12_COLOR_WRITE_ENABLE_ALL
+    } }
+};
+
+const D3D12_BLEND_DESC CommonStates::NonPremultiplied =
+{
+    FALSE, // AlphaToCoverageEnable
+    FALSE, // IndependentBlendEnable
+    { {
+        TRUE, // BlendEnable
+        FALSE, // LogicOpEnable
+        D3D12_BLEND_SRC_ALPHA, // SrcBlend
+        D3D12_BLEND_INV_SRC_ALPHA, // DestBlend
+        D3D12_BLEND_OP_ADD, // BlendOp
+        D3D12_BLEND_SRC_ALPHA, // SrcBlendAlpha
+        D3D12_BLEND_INV_SRC_ALPHA, // DestBlendAlpha
+        D3D12_BLEND_OP_ADD, // BlendOpAlpha
+        D3D12_LOGIC_OP_NOOP,
+        D3D12_COLOR_WRITE_ENABLE_ALL
+    } }
+};
 
 
-// Internal state object implementation class. Only one of these helpers is allocated
-// per D3D device, even if there are multiple public facing CommonStates instances.
+// --------------------------------------------------------------------------
+// Depth-Stencil States
+// --------------------------------------------------------------------------
+
+const D3D12_DEPTH_STENCIL_DESC CommonStates::DepthNone =
+{
+    FALSE, // DepthEnable
+    D3D12_DEPTH_WRITE_MASK_ZERO,
+    D3D12_COMPARISON_FUNC_LESS_EQUAL, // DepthFunc
+    FALSE, // StencilEnable
+    D3D12_DEFAULT_STENCIL_READ_MASK,
+    D3D12_DEFAULT_STENCIL_WRITE_MASK,
+    {
+        D3D12_STENCIL_OP_KEEP, // StencilFailOp
+        D3D12_STENCIL_OP_KEEP, // StencilDepthFailOp
+        D3D12_STENCIL_OP_KEEP, // StencilPassOp
+        D3D12_COMPARISON_FUNC_ALWAYS // StencilFunc
+    }, // FrontFace
+    {
+        D3D12_STENCIL_OP_KEEP, // StencilFailOp
+        D3D12_STENCIL_OP_KEEP, // StencilDepthFailOp
+        D3D12_STENCIL_OP_KEEP, // StencilPassOp
+        D3D12_COMPARISON_FUNC_ALWAYS // StencilFunc
+    } // BackFace
+};
+
+const D3D12_DEPTH_STENCIL_DESC CommonStates::DepthDefault =
+{
+    TRUE, // DepthEnable
+    D3D12_DEPTH_WRITE_MASK_ALL,
+    D3D12_COMPARISON_FUNC_LESS_EQUAL, // DepthFunc
+    FALSE, // StencilEnable
+    D3D12_DEFAULT_STENCIL_READ_MASK,
+    D3D12_DEFAULT_STENCIL_WRITE_MASK,
+    {
+        D3D12_STENCIL_OP_KEEP, // StencilFailOp
+        D3D12_STENCIL_OP_KEEP, // StencilDepthFailOp
+        D3D12_STENCIL_OP_KEEP, // StencilPassOp
+        D3D12_COMPARISON_FUNC_ALWAYS // StencilFunc
+    }, // FrontFace
+    {
+        D3D12_STENCIL_OP_KEEP, // StencilFailOp
+        D3D12_STENCIL_OP_KEEP, // StencilDepthFailOp
+        D3D12_STENCIL_OP_KEEP, // StencilPassOp
+        D3D12_COMPARISON_FUNC_ALWAYS // StencilFunc
+    } // BackFace
+};
+
+const D3D12_DEPTH_STENCIL_DESC CommonStates::DepthRead =
+{
+    TRUE, // DepthEnable
+    D3D12_DEPTH_WRITE_MASK_ZERO,
+    D3D12_COMPARISON_FUNC_LESS_EQUAL, // DepthFunc
+    FALSE, // StencilEnable
+    D3D12_DEFAULT_STENCIL_READ_MASK,
+    D3D12_DEFAULT_STENCIL_WRITE_MASK,
+    {
+        D3D12_STENCIL_OP_KEEP, // StencilFailOp
+        D3D12_STENCIL_OP_KEEP, // StencilDepthFailOp
+        D3D12_STENCIL_OP_KEEP, // StencilPassOp
+        D3D12_COMPARISON_FUNC_ALWAYS // StencilFunc
+    }, // FrontFace
+    {
+        D3D12_STENCIL_OP_KEEP, // StencilFailOp
+        D3D12_STENCIL_OP_KEEP, // StencilDepthFailOp
+        D3D12_STENCIL_OP_KEEP, // StencilPassOp
+        D3D12_COMPARISON_FUNC_ALWAYS // StencilFunc
+    } // BackFace
+};
+
+const D3D12_DEPTH_STENCIL_DESC CommonStates::DepthReverseZ =
+{
+    TRUE, // DepthEnable
+    D3D12_DEPTH_WRITE_MASK_ALL,
+    D3D12_COMPARISON_FUNC_GREATER_EQUAL, // DepthFunc
+    FALSE, // StencilEnable
+    D3D12_DEFAULT_STENCIL_READ_MASK,
+    D3D12_DEFAULT_STENCIL_WRITE_MASK,
+    {
+        D3D12_STENCIL_OP_KEEP, // StencilFailOp
+        D3D12_STENCIL_OP_KEEP, // StencilDepthFailOp
+        D3D12_STENCIL_OP_KEEP, // StencilPassOp
+        D3D12_COMPARISON_FUNC_ALWAYS // StencilFunc
+    }, // FrontFace
+    {
+        D3D12_STENCIL_OP_KEEP, // StencilFailOp
+        D3D12_STENCIL_OP_KEEP, // StencilDepthFailOp
+        D3D12_STENCIL_OP_KEEP, // StencilPassOp
+        D3D12_COMPARISON_FUNC_ALWAYS // StencilFunc
+    } // BackFace
+};
+
+const D3D12_DEPTH_STENCIL_DESC CommonStates::DepthReadReverseZ =
+{
+    TRUE, // DepthEnable
+    D3D12_DEPTH_WRITE_MASK_ZERO,
+    D3D12_COMPARISON_FUNC_GREATER_EQUAL, // DepthFunc
+    FALSE, // StencilEnable
+    D3D12_DEFAULT_STENCIL_READ_MASK,
+    D3D12_DEFAULT_STENCIL_WRITE_MASK,
+    {
+        D3D12_STENCIL_OP_KEEP, // StencilFailOp
+        D3D12_STENCIL_OP_KEEP, // StencilDepthFailOp
+        D3D12_STENCIL_OP_KEEP, // StencilPassOp
+        D3D12_COMPARISON_FUNC_ALWAYS // StencilFunc
+    }, // FrontFace
+    {
+        D3D12_STENCIL_OP_KEEP, // StencilFailOp
+        D3D12_STENCIL_OP_KEEP, // StencilDepthFailOp
+        D3D12_STENCIL_OP_KEEP, // StencilPassOp
+        D3D12_COMPARISON_FUNC_ALWAYS // StencilFunc
+    } // BackFace
+};
+
+
+// --------------------------------------------------------------------------
+// Rasterizer States
+// --------------------------------------------------------------------------
+
+const D3D12_RASTERIZER_DESC CommonStates::CullNone =
+{
+    D3D12_FILL_MODE_SOLID,
+    D3D12_CULL_MODE_NONE,
+    FALSE, // FrontCounterClockwise
+    D3D12_DEFAULT_DEPTH_BIAS,
+    D3D12_DEFAULT_DEPTH_BIAS_CLAMP,
+    D3D12_DEFAULT_SLOPE_SCALED_DEPTH_BIAS,
+    TRUE, // DepthClipEnable
+    TRUE, // MultisampleEnable
+    FALSE, // AntialiasedLineEnable
+    0, // ForcedSampleCount
+    D3D12_CONSERVATIVE_RASTERIZATION_MODE_OFF
+};
+
+const D3D12_RASTERIZER_DESC CommonStates::CullClockwise =
+{
+    D3D12_FILL_MODE_SOLID,
+    D3D12_CULL_MODE_FRONT,
+    FALSE, // FrontCounterClockwise
+    D3D12_DEFAULT_DEPTH_BIAS,
+    D3D12_DEFAULT_DEPTH_BIAS_CLAMP,
+    D3D12_DEFAULT_SLOPE_SCALED_DEPTH_BIAS,
+    TRUE, // DepthClipEnable
+    TRUE, // MultisampleEnable
+    FALSE, // AntialiasedLineEnable
+    0, // ForcedSampleCount
+    D3D12_CONSERVATIVE_RASTERIZATION_MODE_OFF
+};
+
+const D3D12_RASTERIZER_DESC CommonStates::CullCounterClockwise =
+{
+    D3D12_FILL_MODE_SOLID,
+    D3D12_CULL_MODE_BACK,
+    FALSE, // FrontCounterClockwise
+    D3D12_DEFAULT_DEPTH_BIAS,
+    D3D12_DEFAULT_DEPTH_BIAS_CLAMP,
+    D3D12_DEFAULT_SLOPE_SCALED_DEPTH_BIAS,
+    TRUE, // DepthClipEnable
+    TRUE, // MultisampleEnable
+    FALSE, // AntialiasedLineEnable
+    0, // ForcedSampleCount
+    D3D12_CONSERVATIVE_RASTERIZATION_MODE_OFF
+};
+
+const D3D12_RASTERIZER_DESC CommonStates::Wireframe =
+{
+    D3D12_FILL_MODE_WIREFRAME,
+    D3D12_CULL_MODE_NONE,
+    FALSE, // FrontCounterClockwise
+    D3D12_DEFAULT_DEPTH_BIAS,
+    D3D12_DEFAULT_DEPTH_BIAS_CLAMP,
+    D3D12_DEFAULT_SLOPE_SCALED_DEPTH_BIAS,
+    TRUE, // DepthClipEnable
+    TRUE, // MultisampleEnable
+    FALSE, // AntialiasedLineEnable
+    0, // ForcedSampleCount
+    D3D12_CONSERVATIVE_RASTERIZATION_MODE_OFF
+};
+
+
+// --------------------------------------------------------------------------
+// Static sampler States
+// --------------------------------------------------------------------------
+
+const D3D12_STATIC_SAMPLER_DESC CommonStates::StaticPointWrap(
+    unsigned int shaderRegister,
+    D3D12_SHADER_VISIBILITY shaderVisibility,
+    unsigned int registerSpace) noexcept
+{
+    static const D3D12_STATIC_SAMPLER_DESC s_desc = {
+        D3D12_FILTER_MIN_MAG_MIP_POINT,
+        D3D12_TEXTURE_ADDRESS_MODE_WRAP, // AddressU
+        D3D12_TEXTURE_ADDRESS_MODE_WRAP, // AddressV
+        D3D12_TEXTURE_ADDRESS_MODE_WRAP, // AddressW
+        0, // MipLODBias
+        D3D12_MAX_MAXANISOTROPY,
+        D3D12_COMPARISON_FUNC_NEVER,
+        D3D12_STATIC_BORDER_COLOR_OPAQUE_BLACK,
+        0, // MinLOD
+        FLT_MAX, // MaxLOD
+        0, // ShaderRegister
+        0, // RegisterSpace
+        D3D12_SHADER_VISIBILITY_ALL,
+    };
+
+    D3D12_STATIC_SAMPLER_DESC desc = s_desc;
+    desc.ShaderRegister = shaderRegister;
+    desc.ShaderVisibility = shaderVisibility;
+    desc.RegisterSpace = registerSpace;
+    return desc;
+}
+
+const D3D12_STATIC_SAMPLER_DESC CommonStates::StaticPointClamp(
+    unsigned int shaderRegister,
+    D3D12_SHADER_VISIBILITY shaderVisibility,
+    unsigned int registerSpace) noexcept
+{
+    static const D3D12_STATIC_SAMPLER_DESC s_desc = {
+        D3D12_FILTER_MIN_MAG_MIP_POINT,
+        D3D12_TEXTURE_ADDRESS_MODE_CLAMP, // AddressU
+        D3D12_TEXTURE_ADDRESS_MODE_CLAMP, // AddressV
+        D3D12_TEXTURE_ADDRESS_MODE_CLAMP, // AddressW
+        0, // MipLODBias
+        D3D12_MAX_MAXANISOTROPY,
+        D3D12_COMPARISON_FUNC_NEVER,
+        D3D12_STATIC_BORDER_COLOR_OPAQUE_BLACK,
+        0, // MinLOD
+        FLT_MAX, // MaxLOD
+        0, // ShaderRegister
+        0, // RegisterSpace
+        D3D12_SHADER_VISIBILITY_ALL,
+    };
+
+    D3D12_STATIC_SAMPLER_DESC desc = s_desc;
+    desc.ShaderRegister = shaderRegister;
+    desc.ShaderVisibility = shaderVisibility;
+    desc.RegisterSpace = registerSpace;
+    return desc;
+};
+
+const D3D12_STATIC_SAMPLER_DESC CommonStates::StaticLinearWrap(
+    unsigned int shaderRegister,
+    D3D12_SHADER_VISIBILITY shaderVisibility,
+    unsigned int registerSpace) noexcept
+{
+    static const D3D12_STATIC_SAMPLER_DESC s_desc = {
+        D3D12_FILTER_MIN_MAG_MIP_LINEAR,
+        D3D12_TEXTURE_ADDRESS_MODE_WRAP, // AddressU
+        D3D12_TEXTURE_ADDRESS_MODE_WRAP, // AddressV
+        D3D12_TEXTURE_ADDRESS_MODE_WRAP, // AddressW
+        0, // MipLODBias
+        D3D12_MAX_MAXANISOTROPY,
+        D3D12_COMPARISON_FUNC_NEVER,
+        D3D12_STATIC_BORDER_COLOR_OPAQUE_BLACK,
+        0, // MinLOD
+        FLT_MAX, // MaxLOD
+        0, // ShaderRegister
+        0, // RegisterSpace
+        D3D12_SHADER_VISIBILITY_ALL,
+    };
+
+    D3D12_STATIC_SAMPLER_DESC desc = s_desc;
+    desc.ShaderRegister = shaderRegister;
+    desc.ShaderVisibility = shaderVisibility;
+    desc.RegisterSpace = registerSpace;
+    return desc;
+};
+
+const D3D12_STATIC_SAMPLER_DESC CommonStates::StaticLinearClamp(
+    unsigned int shaderRegister,
+    D3D12_SHADER_VISIBILITY shaderVisibility,
+    unsigned int registerSpace) noexcept
+{
+    static const D3D12_STATIC_SAMPLER_DESC s_desc = {
+        D3D12_FILTER_MIN_MAG_MIP_LINEAR,
+        D3D12_TEXTURE_ADDRESS_MODE_CLAMP, // AddressU
+        D3D12_TEXTURE_ADDRESS_MODE_CLAMP, // AddressV
+        D3D12_TEXTURE_ADDRESS_MODE_CLAMP, // AddressW
+        0, // MipLODBias
+        D3D12_MAX_MAXANISOTROPY,
+        D3D12_COMPARISON_FUNC_NEVER,
+        D3D12_STATIC_BORDER_COLOR_OPAQUE_BLACK,
+        0, // MinLOD
+        FLT_MAX, // MaxLOD
+        0, // ShaderRegister
+        0, // RegisterSpace
+        D3D12_SHADER_VISIBILITY_ALL,
+    };
+
+    D3D12_STATIC_SAMPLER_DESC desc = s_desc;
+    desc.ShaderRegister = shaderRegister;
+    desc.ShaderVisibility = shaderVisibility;
+    desc.RegisterSpace = registerSpace;
+    return desc;
+};
+
+const D3D12_STATIC_SAMPLER_DESC CommonStates::StaticAnisotropicWrap(
+    unsigned int shaderRegister,
+    D3D12_SHADER_VISIBILITY shaderVisibility,
+    unsigned int registerSpace) noexcept
+{
+    static const D3D12_STATIC_SAMPLER_DESC s_desc = {
+        D3D12_FILTER_ANISOTROPIC,
+        D3D12_TEXTURE_ADDRESS_MODE_WRAP, // AddressU
+        D3D12_TEXTURE_ADDRESS_MODE_WRAP, // AddressV
+        D3D12_TEXTURE_ADDRESS_MODE_WRAP, // AddressW
+        0, // MipLODBias
+        D3D12_MAX_MAXANISOTROPY,
+        D3D12_COMPARISON_FUNC_NEVER,
+        D3D12_STATIC_BORDER_COLOR_OPAQUE_BLACK,
+        0, // MinLOD
+        FLT_MAX, // MaxLOD
+        0, // ShaderRegister
+        0, // RegisterSpace
+        D3D12_SHADER_VISIBILITY_ALL,
+    };
+
+    D3D12_STATIC_SAMPLER_DESC desc = s_desc;
+    desc.ShaderRegister = shaderRegister;
+    desc.ShaderVisibility = shaderVisibility;
+    desc.RegisterSpace = registerSpace;
+    return desc;
+};
+
+const D3D12_STATIC_SAMPLER_DESC CommonStates::StaticAnisotropicClamp(
+    unsigned int shaderRegister,
+    D3D12_SHADER_VISIBILITY shaderVisibility,
+    unsigned int registerSpace) noexcept
+{
+    static const D3D12_STATIC_SAMPLER_DESC s_desc = {
+        D3D12_FILTER_ANISOTROPIC,
+        D3D12_TEXTURE_ADDRESS_MODE_CLAMP, // AddressU
+        D3D12_TEXTURE_ADDRESS_MODE_CLAMP, // AddressV
+        D3D12_TEXTURE_ADDRESS_MODE_CLAMP, // AddressW
+        0, // MipLODBias
+        D3D12_MAX_MAXANISOTROPY,
+        D3D12_COMPARISON_FUNC_NEVER,
+        D3D12_STATIC_BORDER_COLOR_OPAQUE_BLACK,
+        0, // MinLOD
+        FLT_MAX, // MaxLOD
+        0, // ShaderRegister
+        0, // RegisterSpace
+        D3D12_SHADER_VISIBILITY_ALL,
+    };
+
+    D3D12_STATIC_SAMPLER_DESC desc = s_desc;
+    desc.ShaderRegister = shaderRegister;
+    desc.ShaderVisibility = shaderVisibility;
+    desc.RegisterSpace = registerSpace;
+    return desc;
+};
+
+// --------------------------------------------------------------------------
+// Samplers
+// --------------------------------------------------------------------------
+
 class CommonStates::Impl
 {
 public:
-    explicit Impl(_In_ ID3D11Device* device) noexcept
-        : mDevice(device)
+
+    static const D3D12_SAMPLER_DESC SamplerDescs[static_cast<int>(SamplerIndex::Count)];
+
+    explicit Impl(_In_ ID3D12Device* device)
+        : mDescriptors(device, D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE, static_cast<size_t>(SamplerIndex::Count))
     {
+        SetDebugObjectName(mDescriptors.Heap(), L"CommonStates");
+
+        for (size_t i = 0; i < static_cast<size_t>(SamplerIndex::Count); ++i)
+        {
+            device->CreateSampler(&SamplerDescs[i], mDescriptors.GetCpuHandle(i));
+        }
     }
 
     Impl(const Impl&) = delete;
     Impl& operator=(const Impl&) = delete;
 
-    Impl(Impl&&) = delete;
-    Impl& operator=(Impl&&) = delete;
+    Impl(Impl&&) = default;
+    Impl& operator=(Impl&&) = default;
 
-    HRESULT CreateBlendState(D3D11_BLEND srcBlend, D3D11_BLEND destBlend, _Outptr_ ID3D11BlendState** pResult);
-    HRESULT CreateDepthStencilState(bool enable, bool writeEnable, bool reverseZ, _Outptr_ ID3D11DepthStencilState** pResult);
-    HRESULT CreateRasterizerState(D3D11_CULL_MODE cullMode, D3D11_FILL_MODE fillMode, _Outptr_ ID3D11RasterizerState** pResult);
-    HRESULT CreateSamplerState(D3D11_FILTER filter, D3D11_TEXTURE_ADDRESS_MODE addressMode, _Outptr_ ID3D11SamplerState** pResult);
+    D3D12_GPU_DESCRIPTOR_HANDLE Get(SamplerIndex i) const
+    {
+        return mDescriptors.GetGpuHandle(static_cast<size_t>(i));
+    }
 
-    ComPtr<ID3D11Device> mDevice;
+    ID3D12DescriptorHeap* Heap() const noexcept
+    {
+        return mDescriptors.Heap();
+    }
 
-    ComPtr<ID3D11BlendState> opaque;
-    ComPtr<ID3D11BlendState> alphaBlend;
-    ComPtr<ID3D11BlendState> additive;
-    ComPtr<ID3D11BlendState> nonPremultiplied;
+private:
+    DescriptorHeap mDescriptors;
+};
 
-    ComPtr<ID3D11DepthStencilState> depthNone;
-    ComPtr<ID3D11DepthStencilState> depthDefault;
-    ComPtr<ID3D11DepthStencilState> depthRead;
-    ComPtr<ID3D11DepthStencilState> depthReverseZ;
-    ComPtr<ID3D11DepthStencilState> depthReadReverseZ;
-
-    ComPtr<ID3D11RasterizerState> cullNone;
-    ComPtr<ID3D11RasterizerState> cullClockwise;
-    ComPtr<ID3D11RasterizerState> cullCounterClockwise;
-    ComPtr<ID3D11RasterizerState> wireframe;
-
-    ComPtr<ID3D11SamplerState> pointWrap;
-    ComPtr<ID3D11SamplerState> pointClamp;
-    ComPtr<ID3D11SamplerState> linearWrap;
-    ComPtr<ID3D11SamplerState> linearClamp;
-    ComPtr<ID3D11SamplerState> anisotropicWrap;
-    ComPtr<ID3D11SamplerState> anisotropicClamp;
-
-    std::mutex mutex;
-
-    static SharedResourcePool<ID3D11Device*, Impl> instancePool;
+const D3D12_SAMPLER_DESC CommonStates::Impl::SamplerDescs[] =
+{
+    // PointWrap
+    {
+        D3D12_FILTER_MIN_MAG_MIP_POINT,
+        D3D12_TEXTURE_ADDRESS_MODE_WRAP, // AddressU
+        D3D12_TEXTURE_ADDRESS_MODE_WRAP, // AddressV
+        D3D12_TEXTURE_ADDRESS_MODE_WRAP, // AddressW
+        0, // MipLODBias
+        D3D12_MAX_MAXANISOTROPY,
+        D3D12_COMPARISON_FUNC_NEVER,
+        { 0, 0, 0, 0 }, // BorderColor
+        0, // MinLOD
+        FLT_MAX // MaxLOD
+    },
+    // PointClamp
+    {
+        D3D12_FILTER_MIN_MAG_MIP_POINT,
+        D3D12_TEXTURE_ADDRESS_MODE_CLAMP, // AddressU
+        D3D12_TEXTURE_ADDRESS_MODE_CLAMP, // AddressV
+        D3D12_TEXTURE_ADDRESS_MODE_CLAMP, // AddressW
+        0, // MipLODBias
+        D3D12_MAX_MAXANISOTROPY,
+        D3D12_COMPARISON_FUNC_NEVER,
+        { 0, 0, 0, 0 }, // BorderColor
+        0, // MinLOD
+        FLT_MAX // MaxLOD
+    },
+    // LinearWrap
+    {
+        D3D12_FILTER_MIN_MAG_MIP_LINEAR,
+        D3D12_TEXTURE_ADDRESS_MODE_WRAP, // AddressU
+        D3D12_TEXTURE_ADDRESS_MODE_WRAP, // AddressV
+        D3D12_TEXTURE_ADDRESS_MODE_WRAP, // AddressW
+        0, // MipLODBias
+        D3D12_MAX_MAXANISOTROPY,
+        D3D12_COMPARISON_FUNC_NEVER,
+        { 0, 0, 0, 0 }, // BorderColor
+        0, // MinLOD
+        FLT_MAX // MaxLOD
+    },
+    // LinearClamp
+    {
+        D3D12_FILTER_MIN_MAG_MIP_LINEAR,
+        D3D12_TEXTURE_ADDRESS_MODE_CLAMP, // AddressU
+        D3D12_TEXTURE_ADDRESS_MODE_CLAMP, // AddressV
+        D3D12_TEXTURE_ADDRESS_MODE_CLAMP, // AddressW
+        0, // MipLODBias
+        D3D12_MAX_MAXANISOTROPY,
+        D3D12_COMPARISON_FUNC_NEVER,
+        { 0, 0, 0, 0 }, // BorderColor
+        0, // MinLOD
+        FLT_MAX // MaxLOD
+    },
+    // AnisotropicWrap
+    {
+        D3D12_FILTER_ANISOTROPIC,
+        D3D12_TEXTURE_ADDRESS_MODE_WRAP, // AddressU
+        D3D12_TEXTURE_ADDRESS_MODE_WRAP, // AddressV
+        D3D12_TEXTURE_ADDRESS_MODE_WRAP, // AddressW
+        0, // MipLODBias
+        D3D12_MAX_MAXANISOTROPY,
+        D3D12_COMPARISON_FUNC_NEVER,
+        { 0, 0, 0, 0 }, // BorderColor
+        0, // MinLOD
+        FLT_MAX // MaxLOD
+    },
+    // AnisotropicClamp
+    {
+        D3D12_FILTER_ANISOTROPIC,
+        D3D12_TEXTURE_ADDRESS_MODE_CLAMP, // AddressU
+        D3D12_TEXTURE_ADDRESS_MODE_CLAMP, // AddressV
+        D3D12_TEXTURE_ADDRESS_MODE_CLAMP, // AddressW
+        0, // MipLODBias
+        D3D12_MAX_MAXANISOTROPY,
+        D3D12_COMPARISON_FUNC_NEVER,
+        { 0, 0, 0, 0 }, // BorderColor
+        0, // MinLOD
+        FLT_MAX // MaxLOD
+    }
 };
 
 
-// Global instance pool.
-SharedResourcePool<ID3D11Device*, CommonStates::Impl> CommonStates::Impl::instancePool;
-
-
-// Helper for creating blend state objects.
-HRESULT CommonStates::Impl::CreateBlendState(
-    D3D11_BLEND srcBlend,
-    D3D11_BLEND destBlend,
-    _Outptr_ ID3D11BlendState** pResult)
-{
-    D3D11_BLEND_DESC desc = {};
-
-    desc.RenderTarget[0].BlendEnable = (srcBlend != D3D11_BLEND_ONE) ||
-        (destBlend != D3D11_BLEND_ZERO);
-
-    desc.RenderTarget[0].SrcBlend = desc.RenderTarget[0].SrcBlendAlpha = srcBlend;
-    desc.RenderTarget[0].DestBlend = desc.RenderTarget[0].DestBlendAlpha = destBlend;
-    desc.RenderTarget[0].BlendOp = desc.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
-
-    desc.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
-
-    HRESULT hr = mDevice->CreateBlendState(&desc, pResult);
-
-    if (SUCCEEDED(hr))
-        SetDebugObjectName(*pResult, "DirectXTK:CommonStates");
-
-    return hr;
-}
-
-
-// Helper for creating depth stencil state objects.
-HRESULT CommonStates::Impl::CreateDepthStencilState(
-    bool enable,
-    bool writeEnable,
-    bool reverseZ,
-    _Outptr_ ID3D11DepthStencilState** pResult)
-{
-    D3D11_DEPTH_STENCIL_DESC desc = {};
-
-    desc.DepthEnable = enable ? TRUE : FALSE;
-    desc.DepthWriteMask = writeEnable ? D3D11_DEPTH_WRITE_MASK_ALL : D3D11_DEPTH_WRITE_MASK_ZERO;
-    desc.DepthFunc = reverseZ ? D3D11_COMPARISON_GREATER_EQUAL : D3D11_COMPARISON_LESS_EQUAL;
-
-    desc.StencilEnable = FALSE;
-    desc.StencilReadMask = D3D11_DEFAULT_STENCIL_READ_MASK;
-    desc.StencilWriteMask = D3D11_DEFAULT_STENCIL_WRITE_MASK;
-
-    desc.FrontFace.StencilFunc = D3D11_COMPARISON_ALWAYS;
-    desc.FrontFace.StencilPassOp = D3D11_STENCIL_OP_KEEP;
-    desc.FrontFace.StencilFailOp = D3D11_STENCIL_OP_KEEP;
-    desc.FrontFace.StencilDepthFailOp = D3D11_STENCIL_OP_KEEP;
-
-    desc.BackFace = desc.FrontFace;
-
-    HRESULT hr = mDevice->CreateDepthStencilState(&desc, pResult);
-
-    if (SUCCEEDED(hr))
-        SetDebugObjectName(*pResult, "DirectXTK:CommonStates");
-
-    return hr;
-}
-
-
-// Helper for creating rasterizer state objects.
-HRESULT CommonStates::Impl::CreateRasterizerState(
-    D3D11_CULL_MODE cullMode,
-    D3D11_FILL_MODE fillMode,
-    _Outptr_ ID3D11RasterizerState** pResult)
-{
-    D3D11_RASTERIZER_DESC desc = {};
-
-    desc.CullMode = cullMode;
-    desc.FillMode = fillMode;
-    desc.DepthClipEnable = TRUE;
-    desc.MultisampleEnable = TRUE;
-
-    HRESULT hr = mDevice->CreateRasterizerState(&desc, pResult);
-
-    if (SUCCEEDED(hr))
-        SetDebugObjectName(*pResult, "DirectXTK:CommonStates");
-
-    return hr;
-}
-
-
-// Helper for creating sampler state objects.
-HRESULT CommonStates::Impl::CreateSamplerState(
-    D3D11_FILTER filter,
-    D3D11_TEXTURE_ADDRESS_MODE addressMode,
-    _Outptr_ ID3D11SamplerState** pResult)
-{
-    D3D11_SAMPLER_DESC desc = {};
-
-    desc.Filter = filter;
-
-    desc.AddressU = addressMode;
-    desc.AddressV = addressMode;
-    desc.AddressW = addressMode;
-
-    desc.MaxAnisotropy = (mDevice->GetFeatureLevel() > D3D_FEATURE_LEVEL_9_1) ? D3D11_MAX_MAXANISOTROPY : 2u;
-
-    desc.MaxLOD = FLT_MAX;
-    desc.ComparisonFunc = D3D11_COMPARISON_NEVER;
-
-    HRESULT hr = mDevice->CreateSamplerState(&desc, pResult);
-
-    if (SUCCEEDED(hr))
-        SetDebugObjectName(*pResult, "DirectXTK:CommonStates");
-
-    return hr;
-}
-
-
-//--------------------------------------------------------------------------------------
-// CommonStates
-//--------------------------------------------------------------------------------------
-
-// Public constructor.
-CommonStates::CommonStates(_In_ ID3D11Device* device)
-    : pImpl(Impl::instancePool.DemandCreate(device))
+_Use_decl_annotations_
+CommonStates::CommonStates(ID3D12Device* device) :
+    pImpl(std::make_unique<Impl>(device))
 {
 }
-
 
 CommonStates::CommonStates(CommonStates&&) noexcept = default;
-CommonStates& CommonStates::operator= (CommonStates&&) noexcept = default;
+CommonStates& CommonStates::operator = (CommonStates&&) noexcept = default;
 CommonStates::~CommonStates() = default;
 
 
-//--------------------------------------------------------------------------------------
-// Blend states
-//--------------------------------------------------------------------------------------
+D3D12_GPU_DESCRIPTOR_HANDLE CommonStates::PointWrap() const { return pImpl->Get(SamplerIndex::PointWrap); }
+D3D12_GPU_DESCRIPTOR_HANDLE CommonStates::PointClamp() const { return pImpl->Get(SamplerIndex::PointClamp); }
+D3D12_GPU_DESCRIPTOR_HANDLE CommonStates::LinearWrap() const { return pImpl->Get(SamplerIndex::LinearWrap); }
+D3D12_GPU_DESCRIPTOR_HANDLE CommonStates::LinearClamp() const { return pImpl->Get(SamplerIndex::LinearClamp); }
+D3D12_GPU_DESCRIPTOR_HANDLE CommonStates::AnisotropicWrap() const { return pImpl->Get(SamplerIndex::AnisotropicWrap); }
+D3D12_GPU_DESCRIPTOR_HANDLE CommonStates::AnisotropicClamp() const { return pImpl->Get(SamplerIndex::AnisotropicClamp); }
 
-ID3D11BlendState* CommonStates::Opaque() const
-{
-    return DemandCreate(pImpl->opaque, pImpl->mutex, [&](ID3D11BlendState** pResult)
-        {
-            return pImpl->CreateBlendState(D3D11_BLEND_ONE, D3D11_BLEND_ZERO, pResult);
-        });
-}
-
-
-ID3D11BlendState* CommonStates::AlphaBlend() const
-{
-    return DemandCreate(pImpl->alphaBlend, pImpl->mutex, [&](ID3D11BlendState** pResult)
-        {
-            return pImpl->CreateBlendState(D3D11_BLEND_ONE, D3D11_BLEND_INV_SRC_ALPHA, pResult);
-        });
-}
-
-
-ID3D11BlendState* CommonStates::Additive() const
-{
-    return DemandCreate(pImpl->additive, pImpl->mutex, [&](ID3D11BlendState** pResult)
-        {
-            return pImpl->CreateBlendState(D3D11_BLEND_SRC_ALPHA, D3D11_BLEND_ONE, pResult);
-        });
-}
-
-
-ID3D11BlendState* CommonStates::NonPremultiplied() const
-{
-    return DemandCreate(pImpl->nonPremultiplied, pImpl->mutex, [&](ID3D11BlendState** pResult)
-        {
-            return pImpl->CreateBlendState(D3D11_BLEND_SRC_ALPHA, D3D11_BLEND_INV_SRC_ALPHA, pResult);
-        });
-}
-
-
-//--------------------------------------------------------------------------------------
-// Depth stencil states
-//--------------------------------------------------------------------------------------
-
-ID3D11DepthStencilState* CommonStates::DepthNone() const
-{
-    return DemandCreate(pImpl->depthNone, pImpl->mutex, [&](ID3D11DepthStencilState** pResult)
-        {
-            return pImpl->CreateDepthStencilState(false, false, false, pResult);
-        });
-}
-
-
-ID3D11DepthStencilState* CommonStates::DepthDefault() const
-{
-    return DemandCreate(pImpl->depthDefault, pImpl->mutex, [&](ID3D11DepthStencilState** pResult)
-        {
-            return pImpl->CreateDepthStencilState(true, true, false, pResult);
-        });
-}
-
-
-ID3D11DepthStencilState* CommonStates::DepthRead() const
-{
-    return DemandCreate(pImpl->depthRead, pImpl->mutex, [&](ID3D11DepthStencilState** pResult)
-        {
-            return pImpl->CreateDepthStencilState(true, false, false, pResult);
-        });
-}
-
-
-ID3D11DepthStencilState* CommonStates::DepthReverseZ() const
-{
-    return DemandCreate(pImpl->depthReverseZ, pImpl->mutex, [&](ID3D11DepthStencilState** pResult)
-        {
-            return pImpl->CreateDepthStencilState(true, true, true, pResult);
-        });
-}
-
-
-ID3D11DepthStencilState* CommonStates::DepthReadReverseZ() const
-{
-    return DemandCreate(pImpl->depthReadReverseZ, pImpl->mutex, [&](ID3D11DepthStencilState** pResult)
-        {
-            return pImpl->CreateDepthStencilState(true, false, true, pResult);
-        });
-}
-
-
-//--------------------------------------------------------------------------------------
-// Rasterizer states
-//--------------------------------------------------------------------------------------
-
-ID3D11RasterizerState* CommonStates::CullNone() const
-{
-    return DemandCreate(pImpl->cullNone, pImpl->mutex, [&](ID3D11RasterizerState** pResult)
-        {
-            return pImpl->CreateRasterizerState(D3D11_CULL_NONE, D3D11_FILL_SOLID, pResult);
-        });
-}
-
-
-ID3D11RasterizerState* CommonStates::CullClockwise() const
-{
-    return DemandCreate(pImpl->cullClockwise, pImpl->mutex, [&](ID3D11RasterizerState** pResult)
-        {
-            return pImpl->CreateRasterizerState(D3D11_CULL_FRONT, D3D11_FILL_SOLID, pResult);
-        });
-}
-
-
-ID3D11RasterizerState* CommonStates::CullCounterClockwise() const
-{
-    return DemandCreate(pImpl->cullCounterClockwise, pImpl->mutex, [&](ID3D11RasterizerState** pResult)
-        {
-            return pImpl->CreateRasterizerState(D3D11_CULL_BACK, D3D11_FILL_SOLID, pResult);
-        });
-}
-
-
-ID3D11RasterizerState* CommonStates::Wireframe() const
-{
-    return DemandCreate(pImpl->wireframe, pImpl->mutex, [&](ID3D11RasterizerState** pResult)
-        {
-            return pImpl->CreateRasterizerState(D3D11_CULL_NONE, D3D11_FILL_WIREFRAME, pResult);
-        });
-}
-
-
-//--------------------------------------------------------------------------------------
-// Sampler states
-//--------------------------------------------------------------------------------------
-
-ID3D11SamplerState* CommonStates::PointWrap() const
-{
-    return DemandCreate(pImpl->pointWrap, pImpl->mutex, [&](ID3D11SamplerState** pResult)
-        {
-            return pImpl->CreateSamplerState(D3D11_FILTER_MIN_MAG_MIP_POINT, D3D11_TEXTURE_ADDRESS_WRAP, pResult);
-        });
-}
-
-
-ID3D11SamplerState* CommonStates::PointClamp() const
-{
-    return DemandCreate(pImpl->pointClamp, pImpl->mutex, [&](ID3D11SamplerState** pResult)
-        {
-            return pImpl->CreateSamplerState(D3D11_FILTER_MIN_MAG_MIP_POINT, D3D11_TEXTURE_ADDRESS_CLAMP, pResult);
-        });
-}
-
-
-ID3D11SamplerState* CommonStates::LinearWrap() const
-{
-    return DemandCreate(pImpl->linearWrap, pImpl->mutex, [&](ID3D11SamplerState** pResult)
-        {
-            return pImpl->CreateSamplerState(D3D11_FILTER_MIN_MAG_MIP_LINEAR, D3D11_TEXTURE_ADDRESS_WRAP, pResult);
-        });
-}
-
-
-ID3D11SamplerState* CommonStates::LinearClamp() const
-{
-    return DemandCreate(pImpl->linearClamp, pImpl->mutex, [&](ID3D11SamplerState** pResult)
-        {
-            return pImpl->CreateSamplerState(D3D11_FILTER_MIN_MAG_MIP_LINEAR, D3D11_TEXTURE_ADDRESS_CLAMP, pResult);
-        });
-}
-
-
-ID3D11SamplerState* CommonStates::AnisotropicWrap() const
-{
-    return DemandCreate(pImpl->anisotropicWrap, pImpl->mutex, [&](ID3D11SamplerState** pResult)
-        {
-            return pImpl->CreateSamplerState(D3D11_FILTER_ANISOTROPIC, D3D11_TEXTURE_ADDRESS_WRAP, pResult);
-        });
-}
-
-
-ID3D11SamplerState* CommonStates::AnisotropicClamp() const
-{
-    return DemandCreate(pImpl->anisotropicClamp, pImpl->mutex, [&](ID3D11SamplerState** pResult)
-        {
-            return pImpl->CreateSamplerState(D3D11_FILTER_ANISOTROPIC, D3D11_TEXTURE_ADDRESS_CLAMP, pResult);
-        });
-}
+ID3D12DescriptorHeap* CommonStates::Heap() const noexcept { return pImpl->Heap(); }

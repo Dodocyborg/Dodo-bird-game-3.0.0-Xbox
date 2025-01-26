@@ -4,27 +4,33 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 //
-// http://go.microsoft.com/fwlink/?LinkId=248929
+// http://go.microsoft.com/fwlink/?LinkID=615561
 //--------------------------------------------------------------------------------------
 
 #pragma once
 
-#if defined(_XBOX_ONE) && defined(_TITLE)
-#include <d3d11_x.h>
+#ifdef _GAMING_XBOX_SCARLETT
+#include <d3d12_xs.h>
+#elif (defined(_XBOX_ONE) && defined(_TITLE)) || defined(_GAMING_XBOX)
+#include <d3d12_x.h>
+#elif defined(USING_DIRECTX_HEADERS)
+#include <directx/d3d12.h>
+#include <dxguids/dxguids.h>
 #else
-#include <d3d11_1.h>
+#include <d3d12.h>
 #endif
 
 #include <cstdint>
 #include <memory>
-#include <functional>
 
 #include <DirectXMath.h>
+
+#include "RenderTargetState.h"
 
 
 namespace DirectX
 {
-    inline namespace DX11
+    inline namespace DX12
     {
         //------------------------------------------------------------------------------
         // Abstract interface representing a post-process pass
@@ -36,8 +42,7 @@ namespace DirectX
             IPostProcess(const IPostProcess&) = delete;
             IPostProcess& operator=(const IPostProcess&) = delete;
 
-            virtual void __cdecl Process(_In_ ID3D11DeviceContext* deviceContext,
-                _In_ std::function<void __cdecl()> setCustomState = nullptr) = 0;
+            virtual void __cdecl Process(_In_ ID3D12GraphicsCommandList* commandList) = 0;
 
         protected:
             IPostProcess() = default;
@@ -64,7 +69,7 @@ namespace DirectX
                 Effect_Max
             };
 
-            explicit BasicPostProcess(_In_ ID3D11Device* device);
+            BasicPostProcess(_In_ ID3D12Device* device, const RenderTargetState& rtState, Effect fx);
 
             BasicPostProcess(BasicPostProcess&&) noexcept;
             BasicPostProcess& operator= (BasicPostProcess&&) noexcept;
@@ -75,15 +80,10 @@ namespace DirectX
             ~BasicPostProcess() override;
 
             // IPostProcess methods.
-            void __cdecl Process(
-                _In_ ID3D11DeviceContext* deviceContext,
-                _In_ std::function<void __cdecl()> setCustomState = nullptr) override;
-
-            // Shader control
-            void __cdecl SetEffect(Effect fx);
+            void __cdecl Process(_In_ ID3D12GraphicsCommandList* commandList) override;
 
             // Properties
-            void __cdecl SetSourceTexture(_In_opt_ ID3D11ShaderResourceView* value);
+            void __cdecl SetSourceTexture(D3D12_GPU_DESCRIPTOR_HANDLE srvDescriptor, _In_opt_ ID3D12Resource* resource);
 
             // Sets multiplier for GaussianBlur_5x5
             void __cdecl SetGaussianParameter(float multiplier);
@@ -114,7 +114,7 @@ namespace DirectX
                 Effect_Max
             };
 
-            explicit DualPostProcess(_In_ ID3D11Device* device);
+            DualPostProcess(_In_ ID3D12Device* device, const RenderTargetState& rtState, Effect fx);
 
             DualPostProcess(DualPostProcess&&) noexcept;
             DualPostProcess& operator= (DualPostProcess&&) noexcept;
@@ -125,15 +125,11 @@ namespace DirectX
             ~DualPostProcess() override;
 
             // IPostProcess methods.
-            void __cdecl Process(_In_ ID3D11DeviceContext* deviceContext,
-                _In_ std::function<void __cdecl()> setCustomState = nullptr) override;
-
-            // Shader control
-            void __cdecl SetEffect(Effect fx);
+            void __cdecl Process(_In_ ID3D12GraphicsCommandList* commandList) override;
 
             // Properties
-            void __cdecl SetSourceTexture(_In_opt_ ID3D11ShaderResourceView* value);
-            void __cdecl SetSourceTexture2(_In_opt_ ID3D11ShaderResourceView* value);
+            void __cdecl SetSourceTexture(D3D12_GPU_DESCRIPTOR_HANDLE srvDescriptor);
+            void __cdecl SetSourceTexture2(D3D12_GPU_DESCRIPTOR_HANDLE srvDescriptor);
 
             // Sets parameters for Merge
             void __cdecl SetMergeParameters(float weight1, float weight2);
@@ -181,7 +177,12 @@ namespace DirectX
                 HDTV_to_DCI_P3_D65,  // Rec.709 to DCI-P3-D65 (a.k.a Display P3 or P3D65)
             };
 
-            explicit ToneMapPostProcess(_In_ ID3D11Device* device);
+            ToneMapPostProcess(_In_ ID3D12Device* device, const RenderTargetState& rtState,
+                Operator op, TransferFunction func
+            #if (defined(_XBOX_ONE) && defined(_TITLE)) || defined(_GAMING_XBOX)
+                , bool mrt = false
+            #endif
+            );
 
             ToneMapPostProcess(ToneMapPostProcess&&) noexcept;
             ToneMapPostProcess& operator= (ToneMapPostProcess&&) noexcept;
@@ -192,21 +193,10 @@ namespace DirectX
             ~ToneMapPostProcess() override;
 
             // IPostProcess methods.
-            void __cdecl Process(_In_ ID3D11DeviceContext* deviceContext,
-                _In_ std::function<void __cdecl()> setCustomState = nullptr) override;
-
-            // Shader control
-            void __cdecl SetOperator(Operator op);
-
-            void __cdecl SetTransferFunction(TransferFunction func);
-
-        #if defined(_XBOX_ONE) && defined(_TITLE)
-            // Uses Multiple Render Targets to generate both HDR10 and GameDVR SDR signals
-            void __cdecl SetMRTOutput(bool value = true);
-        #endif
+            void __cdecl Process(_In_ ID3D12GraphicsCommandList* commandList) override;
 
             // Properties
-            void __cdecl SetHDRSourceTexture(_In_opt_ ID3D11ShaderResourceView* value);
+            void __cdecl SetHDRSourceTexture(D3D12_GPU_DESCRIPTOR_HANDLE srvDescriptor);
 
             // Sets the Color Rotation Transform for HDR10 signal output
             void __cdecl SetColorRotation(ColorPrimaryRotation value);

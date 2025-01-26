@@ -4,7 +4,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 //
-// http://go.microsoft.com/fwlink/?LinkId=248929
+// http://go.microsoft.com/fwlink/?LinkID=615561
 //--------------------------------------------------------------------------------------
 
 #include "pch.h"
@@ -16,6 +16,8 @@
 #include "DirectXHelpers.h"
 #include "BinaryReader.h"
 #include "LoaderHelpers.h"
+#include "ResourceUploadBatch.h"
+#include "DescriptorHeap.h"
 
 using namespace DirectX;
 using Microsoft::WRL::ComPtr;
@@ -25,10 +27,14 @@ using Microsoft::WRL::ComPtr;
 class SpriteFont::Impl
 {
 public:
-    Impl(_In_ ID3D11Device* device,
+    Impl(_In_ ID3D12Device* device,
+        ResourceUploadBatch& upload,
         _In_ BinaryReader* reader,
+        D3D12_CPU_DESCRIPTOR_HANDLE cpuDesc,
+        D3D12_GPU_DESCRIPTOR_HANDLE gpuDesc,
         bool forceSRGB) noexcept(false);
-    Impl(_In_ ID3D11ShaderResourceView* texture,
+    Impl(D3D12_GPU_DESCRIPTOR_HANDLE texture,
+        XMUINT2 textureSize,
         _In_reads_(glyphCount) Glyph const* glyphs,
         size_t glyphCount,
         float lineSpacing) noexcept(false);
@@ -46,7 +52,8 @@ public:
     template<typename TAction>
     void ForEachGlyph(_In_z_ wchar_t const* text, TAction action, bool ignoreWhitespace) const;
 
-    void CreateTextureResource(_In_ ID3D11Device* device,
+    void CreateTextureResource(_In_ ID3D12Device* device,
+        ResourceUploadBatch& upload,
         uint32_t width, uint32_t height,
         DXGI_FORMAT format,
         uint32_t stride, uint32_t rows,
@@ -55,7 +62,9 @@ public:
     const wchar_t* ConvertUTF8(_In_z_ const char *text) noexcept(false);
 
     // Fields.
-    ComPtr<ID3D11ShaderResourceView> texture;
+    ComPtr<ID3D12Resource> textureResource;
+    D3D12_GPU_DESCRIPTOR_HANDLE texture;
+    XMUINT2 textureSize;
     std::vector<Glyph> glyphs;
     std::vector<uint32_t> glyphsIndex;
     Glyph const* defaultGlyph;
@@ -96,9 +105,14 @@ namespace DirectX
 // Reads a SpriteFont from the binary format created by the MakeSpriteFont utility.
 _Use_decl_annotations_
 SpriteFont::Impl::Impl(
-    ID3D11Device* device,
+    ID3D12Device* device,
+    ResourceUploadBatch& upload,
     BinaryReader* reader,
+    D3D12_CPU_DESCRIPTOR_HANDLE cpuDesc,
+    D3D12_GPU_DESCRIPTOR_HANDLE gpuDesc,
     bool forceSRGB) noexcept(false) :
+    texture{},
+    textureSize{},
     defaultGlyph(nullptr),
     lineSpacing(0),
     utfBufferSize(0)
@@ -154,21 +168,33 @@ SpriteFont::Impl::Impl(
     // Create the D3D texture.
     CreateTextureResource(
         device,
+        upload,
         textureWidth, textureHeight,
         textureFormat,
         textureStride, textureRows,
         textureData);
+
+    // Create the shader resource view
+    CreateShaderResourceView(
+        device, textureResource.Get(),
+        cpuDesc, false);
+
+    // Save off the GPU descriptor pointer and size.
+    texture = gpuDesc;
+    textureSize = XMUINT2(textureWidth, textureHeight);
 }
 
 
 // Constructs a SpriteFont from arbitrary user specified glyph data.
 _Use_decl_annotations_
 SpriteFont::Impl::Impl(
-    ID3D11ShaderResourceView* itexture,
+    D3D12_GPU_DESCRIPTOR_HANDLE itexture,
+    XMUINT2 itextureSize,
     Glyph const* iglyphs,
     size_t glyphCount,
     float ilineSpacing) noexcept(false) :
     texture(itexture),
+    textureSize(itextureSize),
     glyphs(iglyphs, iglyphs + glyphCount),
     defaultGlyph(nullptr),
     lineSpacing(ilineSpacing),
@@ -299,7 +325,8 @@ void SpriteFont::Impl::ForEachGlyph(_In_z_ wchar_t const* text, TAction action, 
 
 _Use_decl_annotations_
 void SpriteFont::Impl::CreateTextureResource(
-    ID3D11Device* device,
+    ID3D12Device* device,
+    ResourceUploadBatch& upload,
     uint32_t width, uint32_t height,
     DXGI_FORMAT format,
     uint32_t stride, uint32_t rows,
@@ -312,30 +339,39 @@ void SpriteFont::Impl::CreateTextureResource(
         throw std::overflow_error("Invalid .spritefont file");
     }
 
-    D3D11_TEXTURE2D_DESC desc = {};
+    D3D12_RESOURCE_DESC desc = {};
+    desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
     desc.Width = width;
     desc.Height = height;
+    desc.DepthOrArraySize = 1;
     desc.MipLevels = 1;
-    desc.ArraySize = 1;
     desc.Format = format;
     desc.SampleDesc.Count = 1;
-    desc.Usage = D3D11_USAGE_IMMUTABLE;
-    desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
 
-    D3D11_SUBRESOURCE_DATA initData = { data, stride, static_cast<UINT>(sliceBytes) };
+    const CD3DX12_HEAP_PROPERTIES defaultHeapProperties(D3D12_HEAP_TYPE_DEFAULT);
 
-    ComPtr<ID3D11Texture2D> texture2D;
-    ThrowIfFailed(
-        device->CreateTexture2D(&desc, &initData, &texture2D)
-    );
+    ThrowIfFailed(device->CreateCommittedResource(
+        &defaultHeapProperties,
+        D3D12_HEAP_FLAG_NONE,
+        &desc,
+        c_initialCopyTargetState,
+        nullptr,
+        IID_GRAPHICS_PPV_ARGS(textureResource.ReleaseAndGetAddressOf())));
 
-    CD3D11_SHADER_RESOURCE_VIEW_DESC viewDesc(D3D11_SRV_DIMENSION_TEXTURE2D, format);
-    ThrowIfFailed(
-        device->CreateShaderResourceView(texture2D.Get(), &viewDesc, texture.ReleaseAndGetAddressOf())
-    );
+    SetDebugObjectName(textureResource.Get(), L"SpriteFont:Texture");
 
-    SetDebugObjectName(texture.Get(), "DirectXTK:SpriteFont");
-    SetDebugObjectName(texture2D.Get(), "DirectXTK:SpriteFont");
+    D3D12_SUBRESOURCE_DATA initData = { data, static_cast<LONG_PTR>(stride), static_cast<LONG_PTR>(sliceBytes) };
+
+    upload.Upload(
+        textureResource.Get(),
+        0,
+        &initData,
+        1);
+
+    upload.Transition(
+        textureResource.Get(),
+        D3D12_RESOURCE_STATE_COPY_DEST,
+        D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 }
 
 
@@ -371,28 +407,28 @@ const wchar_t* SpriteFont::Impl::ConvertUTF8(_In_z_ const char *text) noexcept(f
 
 // Construct from a binary file created by the MakeSpriteFont utility.
 _Use_decl_annotations_
-SpriteFont::SpriteFont(ID3D11Device* device, wchar_t const* fileName, bool forceSRGB)
+SpriteFont::SpriteFont(ID3D12Device* device, ResourceUploadBatch& upload, wchar_t const* fileName, D3D12_CPU_DESCRIPTOR_HANDLE cpuDescriptorDest, D3D12_GPU_DESCRIPTOR_HANDLE gpuDescriptorDest, bool forceSRGB)
 {
     BinaryReader reader(fileName);
 
-    pImpl = std::make_unique<Impl>(device, &reader, forceSRGB);
+    pImpl = std::make_unique<Impl>(device, upload, &reader, cpuDescriptorDest, gpuDescriptorDest, forceSRGB);
 }
 
 
 // Construct from a binary blob created by the MakeSpriteFont utility and already loaded into memory.
 _Use_decl_annotations_
-SpriteFont::SpriteFont(ID3D11Device* device, uint8_t const* dataBlob, size_t dataSize, bool forceSRGB)
+SpriteFont::SpriteFont(ID3D12Device* device, ResourceUploadBatch& upload, uint8_t const* dataBlob, size_t dataSize, D3D12_CPU_DESCRIPTOR_HANDLE cpuDescriptorDest, D3D12_GPU_DESCRIPTOR_HANDLE gpuDescriptorDest, bool forceSRGB)
 {
     BinaryReader reader(dataBlob, dataSize);
 
-    pImpl = std::make_unique<Impl>(device, &reader, forceSRGB);
+    pImpl = std::make_unique<Impl>(device, upload, &reader, cpuDescriptorDest, gpuDescriptorDest, forceSRGB);
 }
 
 
 // Construct from arbitrary user specified glyph data (for those not using the MakeSpriteFont utility).
 _Use_decl_annotations_
-SpriteFont::SpriteFont(ID3D11ShaderResourceView* texture, Glyph const* glyphs, size_t glyphCount, float lineSpacing)
-    : pImpl(std::make_unique<Impl>(texture, glyphs, glyphCount, lineSpacing))
+SpriteFont::SpriteFont(D3D12_GPU_DESCRIPTOR_HANDLE texture, XMUINT2 textureSize, Glyph const* glyphs, size_t glyphCount, float lineSpacing)
+    : pImpl(std::make_unique<Impl>(texture, textureSize, glyphs, glyphCount, lineSpacing))
 {
 }
 
@@ -400,7 +436,6 @@ SpriteFont::SpriteFont(ID3D11ShaderResourceView* texture, Glyph const* glyphs, s
 SpriteFont::SpriteFont(SpriteFont&&) noexcept = default;
 SpriteFont& SpriteFont::operator= (SpriteFont&&) noexcept = default;
 SpriteFont::~SpriteFont() = default;
-
 
 // Wide-character / UTF-16LE
 void XM_CALLCONV SpriteFont::DrawString(_In_ SpriteBatch* spriteBatch, _In_z_ wchar_t const* text, XMFLOAT2 const& position, FXMVECTOR color, float rotation, XMFLOAT2 const& origin, float scale, SpriteEffects effects, float layerDepth) const
@@ -473,7 +508,7 @@ void XM_CALLCONV SpriteFont::DrawString(_In_ SpriteBatch* spriteBatch, _In_z_ wc
                 offset = XMVectorMultiplyAdd(glyphRect, axisIsMirroredTable[effects & 3], offset);
             }
 
-            spriteBatch->Draw(pImpl->texture.Get(), position, &glyph->Subrect, color, rotation, offset, scale, effects, layerDepth);
+            spriteBatch->Draw(pImpl->texture, pImpl->textureSize, position, &glyph->Subrect, color, rotation, offset, scale, effects, layerDepth);
         }, true);
 }
 
@@ -635,12 +670,15 @@ SpriteFont::Glyph const* SpriteFont::FindGlyph(wchar_t character) const
 }
 
 
-void SpriteFont::GetSpriteSheet(ID3D11ShaderResourceView** texture) const
+D3D12_GPU_DESCRIPTOR_HANDLE SpriteFont::GetSpriteSheet() const noexcept
 {
-    if (!texture)
-        return;
+    return pImpl->texture;
+}
 
-    ThrowIfFailed(pImpl->texture.CopyTo(texture));
+
+XMUINT2 SpriteFont::GetSpriteSheetSize() const noexcept
+{
+    return pImpl->textureSize;
 }
 
 
@@ -649,8 +687,17 @@ void SpriteFont::GetSpriteSheet(ID3D11ShaderResourceView** texture) const
 
 #if defined(_MSC_VER) && !defined(_NATIVE_WCHAR_T_DEFINED)
 
-SpriteFont::SpriteFont(_In_ ID3D11Device* device, _In_z_ __wchar_t const* fileName, bool forceSRGB) :
-    SpriteFont(device, reinterpret_cast<const unsigned short*>(fileName), forceSRGB)
+SpriteFont::SpriteFont(
+    ID3D12Device* device,
+    ResourceUploadBatch& upload,
+    _In_z_ __wchar_t const* fileName,
+    D3D12_CPU_DESCRIPTOR_HANDLE cpuDescriptorDest,
+    D3D12_GPU_DESCRIPTOR_HANDLE gpuDescriptor,
+    bool forceSRGB) :
+    SpriteFont(
+        device, upload,
+        reinterpret_cast<const unsigned short*>(fileName),
+        cpuDescriptorDest, gpuDescriptor, forceSRGB)
 {
 }
 

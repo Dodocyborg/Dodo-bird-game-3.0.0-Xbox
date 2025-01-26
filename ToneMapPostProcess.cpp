@@ -4,16 +4,19 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 //
-// http://go.microsoft.com/fwlink/?LinkId=248929
+// http://go.microsoft.com/fwlink/?LinkID=615561
 //--------------------------------------------------------------------------------------
 
 #include "pch.h"
 #include "PostProcess.h"
-#include "BufferHelpers.h"
-#include "CommonStates.h"
-#include "DirectXHelpers.h"
+
 #include "AlignedNew.h"
+#include "CommonStates.h"
 #include "DemandCreate.h"
+#include "DirectXHelpers.h"
+#include "EffectPipelineStateDescription.h"
+#include "GraphicsMemory.h"
+#include "PlatformHelpers.h"
 #include "SharedResourcePool.h"
 
 using namespace DirectX;
@@ -25,7 +28,7 @@ namespace
     constexpr int Dirty_ConstantBuffer = 0x01;
     constexpr int Dirty_Parameters = 0x02;
 
-#if defined(_XBOX_ONE) && defined(_TITLE)
+#if (defined(_XBOX_ONE) && defined(_TITLE)) || defined(_GAMING_XBOX)
     constexpr int PixelShaderCount = 15;
     constexpr int ShaderPermutationCount = 24;
 #else
@@ -69,12 +72,47 @@ namespace
     };
 }
 
-
 #pragma region Shaders
 // Include the precompiled shader code.
 namespace
 {
-#if defined(_XBOX_ONE) && defined(_TITLE)
+#ifdef _GAMING_XBOX_SCARLETT
+#include "XboxGamingScarlettToneMap_VSQuad.inc"
+
+#include "XboxGamingScarlettToneMap_PSCopy.inc"
+#include "XboxGamingScarlettToneMap_PSSaturate.inc"
+#include "XboxGamingScarlettToneMap_PSReinhard.inc"
+#include "XboxGamingScarlettToneMap_PSACESFilmic.inc"
+#include "XboxGamingScarlettToneMap_PS_SRGB.inc"
+#include "XboxGamingScarlettToneMap_PSSaturate_SRGB.inc"
+#include "XboxGamingScarlettToneMap_PSReinhard_SRGB.inc"
+#include "XboxGamingScarlettToneMap_PSACESFilmic_SRGB.inc"
+#include "XboxGamingScarlettToneMap_PSHDR10.inc"
+#include "XboxGamingScarlettToneMap_PSHDR10_Saturate.inc"
+#include "XboxGamingScarlettToneMap_PSHDR10_Reinhard.inc"
+#include "XboxGamingScarlettToneMap_PSHDR10_ACESFilmic.inc"
+#include "XboxGamingScarlettToneMap_PSHDR10_Saturate_SRGB.inc"
+#include "XboxGamingScarlettToneMap_PSHDR10_Reinhard_SRGB.inc"
+#include "XboxGamingScarlettToneMap_PSHDR10_ACESFilmic_SRGB.inc"
+#elif defined(_GAMING_XBOX)
+#include "XboxGamingXboxOneToneMap_VSQuad.inc"
+
+#include "XboxGamingXboxOneToneMap_PSCopy.inc"
+#include "XboxGamingXboxOneToneMap_PSSaturate.inc"
+#include "XboxGamingXboxOneToneMap_PSReinhard.inc"
+#include "XboxGamingXboxOneToneMap_PSACESFilmic.inc"
+#include "XboxGamingXboxOneToneMap_PS_SRGB.inc"
+#include "XboxGamingXboxOneToneMap_PSSaturate_SRGB.inc"
+#include "XboxGamingXboxOneToneMap_PSReinhard_SRGB.inc"
+#include "XboxGamingXboxOneToneMap_PSACESFilmic_SRGB.inc"
+#include "XboxGamingXboxOneToneMap_PSHDR10.inc"
+#include "XboxGamingXboxOneToneMap_PSHDR10_Saturate.inc"
+#include "XboxGamingXboxOneToneMap_PSHDR10_Reinhard.inc"
+#include "XboxGamingXboxOneToneMap_PSHDR10_ACESFilmic.inc"
+#include "XboxGamingXboxOneToneMap_PSHDR10_Saturate_SRGB.inc"
+#include "XboxGamingXboxOneToneMap_PSHDR10_Reinhard_SRGB.inc"
+#include "XboxGamingXboxOneToneMap_PSHDR10_ACESFilmic_SRGB.inc"
+#elif defined(_XBOX_ONE) && defined(_TITLE)
 #include "XboxOneToneMap_VSQuad.inc"
 
 #include "XboxOneToneMap_PSCopy.inc"
@@ -109,13 +147,10 @@ namespace
 
 namespace
 {
-    struct ShaderBytecode
-    {
-        void const* code;
-        size_t length;
-    };
+    const D3D12_SHADER_BYTECODE vertexShader =
+    { ToneMap_VSQuad,                   sizeof(ToneMap_VSQuad) };
 
-    const ShaderBytecode pixelShaders[] =
+    const D3D12_SHADER_BYTECODE pixelShaders[] =
     {
         { ToneMap_PSCopy,                   sizeof(ToneMap_PSCopy) },
         { ToneMap_PSSaturate,               sizeof(ToneMap_PSSaturate) },
@@ -127,7 +162,7 @@ namespace
         { ToneMap_PSACESFilmic_SRGB,        sizeof(ToneMap_PSACESFilmic_SRGB) },
         { ToneMap_PSHDR10,                  sizeof(ToneMap_PSHDR10) },
 
-#if defined(_XBOX_ONE) && defined(_TITLE)
+#if (defined(_XBOX_ONE) && defined(_TITLE)) || defined(_GAMING_XBOX)
         // Shaders that generate both HDR10 and GameDVR SDR signals via Multiple Render Targets.
         { ToneMap_PSHDR10_Saturate,         sizeof(ToneMap_PSHDR10_Saturate) },
         { ToneMap_PSHDR10_Reinhard,         sizeof(ToneMap_PSHDR10_Reinhard) },
@@ -160,7 +195,7 @@ namespace
         8,  // HDR10
         8,  // HDR10
 
-#if defined(_XBOX_ONE) && defined(_TITLE)
+#if (defined(_XBOX_ONE) && defined(_TITLE)) || defined(_GAMING_XBOX)
         // MRT Linear EOTF
         9,  // HDR10+Saturate
         9,  // HDR10+Saturate
@@ -183,17 +218,14 @@ namespace
 
     static_assert(static_cast<int>(std::size(pixelShaderIndices)) == ShaderPermutationCount, "array/max mismatch");
 
-    // Factory for lazily instantiating shaders.
+    // Factory for lazily instantiating shared root signatures.
     class DeviceResources
     {
     public:
-        DeviceResources(_In_ ID3D11Device* device)
-            : stateObjects(device),
-            mDevice(device),
-            mVertexShader{},
-            mPixelShaders{},
-            mMutex{}
-        { }
+        DeviceResources(_In_ ID3D12Device* device) noexcept
+            : mDevice(device)
+        {
+        }
 
         DeviceResources(const DeviceResources&) = delete;
         DeviceResources& operator=(const DeviceResources&) = delete;
@@ -201,56 +233,33 @@ namespace
         DeviceResources(DeviceResources&&) = delete;
         DeviceResources& operator=(DeviceResources&&) = delete;
 
-        // Gets or lazily creates the vertex shader.
-        ID3D11VertexShader* GetVertexShader()
+        ID3D12RootSignature* GetRootSignature(const D3D12_ROOT_SIGNATURE_DESC& desc)
         {
-            return DemandCreate(mVertexShader, mMutex, [&](ID3D11VertexShader** pResult) -> HRESULT
+            return DemandCreate(mRootSignature, mMutex, [&](ID3D12RootSignature** pResult) noexcept -> HRESULT
                 {
-                    HRESULT hr = mDevice->CreateVertexShader(ToneMap_VSQuad, sizeof(ToneMap_VSQuad), nullptr, pResult);
+                    HRESULT hr = CreateRootSignature(mDevice.Get(), &desc, pResult);
 
                     if (SUCCEEDED(hr))
-                        SetDebugObjectName(*pResult, "ToneMapPostProcess");
+                        SetDebugObjectName(*pResult, L"ToneMapPostProcess");
 
                     return hr;
                 });
         }
 
-        // Gets or lazily creates the specified pixel shader.
-        ID3D11PixelShader* GetPixelShader(int permutation)
-        {
-            assert(permutation >= 0 && permutation < ShaderPermutationCount);
-            _Analysis_assume_(permutation >= 0 && permutation < ShaderPermutationCount);
-            int shaderIndex = pixelShaderIndices[permutation];
-            assert(shaderIndex >= 0 && shaderIndex < PixelShaderCount);
-            _Analysis_assume_(shaderIndex >= 0 && shaderIndex < PixelShaderCount);
-
-            return DemandCreate(mPixelShaders[shaderIndex], mMutex, [&](ID3D11PixelShader** pResult) -> HRESULT
-                {
-                    HRESULT hr = mDevice->CreatePixelShader(pixelShaders[shaderIndex].code, pixelShaders[shaderIndex].length, nullptr, pResult);
-
-                    if (SUCCEEDED(hr))
-                        SetDebugObjectName(*pResult, "ToneMapPostProcess");
-
-                    return hr;
-                });
-        }
-
-        CommonStates                stateObjects;
+        ID3D12Device* GetDevice() const noexcept { return mDevice.Get(); }
 
     protected:
-        ComPtr<ID3D11Device>        mDevice;
-        ComPtr<ID3D11VertexShader>  mVertexShader;
-        ComPtr<ID3D11PixelShader>   mPixelShaders[PixelShaderCount];
+        ComPtr<ID3D12Device>        mDevice;
+        ComPtr<ID3D12RootSignature> mRootSignature;
         std::mutex                  mMutex;
     };
 }
 #pragma endregion
 
-
 class ToneMapPostProcess::Impl : public AlignedNew<ToneMapConstants>
 {
 public:
-    explicit Impl(_In_ ID3D11Device* device);
+    Impl(_In_ ID3D12Device* device, const RenderTargetState& rtState, Operator op, TransferFunction func, bool mrt = false);
 
     Impl(const Impl&) = delete;
     Impl& operator=(const Impl&) = delete;
@@ -258,84 +267,159 @@ public:
     Impl(Impl&&) = default;
     Impl& operator=(Impl&&) = default;
 
-    void Process(_In_ ID3D11DeviceContext* deviceContext, const std::function<void __cdecl()>& setCustomState);
+    void Process(_In_ ID3D12GraphicsCommandList* commandList);
 
     void SetDirtyFlag() noexcept { mDirtyFlags = INT_MAX; }
 
-    int GetCurrentShaderPermutation() const noexcept;
+    enum RootParameterIndex
+    {
+        TextureSRV,
+        ConstantBuffer,
+        RootParameterCount
+    };
 
     // Fields.
     ToneMapConstants                        constants;
-    ComPtr<ID3D11ShaderResourceView>        hdrTexture;
+    D3D12_GPU_DESCRIPTOR_HANDLE             texture;
     float                                   linearExposure;
     float                                   paperWhiteNits;
-
-    Operator                                op;
-    TransferFunction                        func;
-    bool                                    mrt;
 
 private:
     int                                     mDirtyFlags;
 
-    ConstantBuffer<ToneMapConstants>        mConstantBuffer;
+   // D3D constant buffer holds a copy of the same data as the public 'constants' field.
+    GraphicsResource mConstantBuffer;
+
+    // Per instance cache of PSOs, populated with variants for each shader & layout
+    Microsoft::WRL::ComPtr<ID3D12PipelineState> mPipelineState;
+
+    // Per instance root signature
+    ID3D12RootSignature* mRootSignature;
 
     // Per-device resources.
-    std::shared_ptr<DeviceResources>        mDeviceResources;
+    std::shared_ptr<DeviceResources> mDeviceResources;
 
-    static SharedResourcePool<ID3D11Device*, DeviceResources> deviceResourcesPool;
+    static SharedResourcePool<ID3D12Device*, DeviceResources> deviceResourcesPool;
 };
 
 
 // Global pool of per-device ToneMapPostProcess resources.
-SharedResourcePool<ID3D11Device*, DeviceResources> ToneMapPostProcess::Impl::deviceResourcesPool;
+SharedResourcePool<ID3D12Device*, DeviceResources> ToneMapPostProcess::Impl::deviceResourcesPool;
 
 
 // Constructor.
-ToneMapPostProcess::Impl::Impl(_In_ ID3D11Device* device)
+ToneMapPostProcess::Impl::Impl(_In_ ID3D12Device* device, const RenderTargetState& rtState, Operator op, TransferFunction func, bool mrt)
     : constants{},
+    texture{},
     linearExposure(1.f),
     paperWhiteNits(200.f),
-    op(None),
-    func(Linear),
-    mrt(false),
     mDirtyFlags(INT_MAX),
-    mConstantBuffer(device),
     mDeviceResources(deviceResourcesPool.DemandCreate(device))
 {
-    if (device->GetFeatureLevel() < D3D_FEATURE_LEVEL_10_0)
+    if (op >= Operator_Max)
+        throw std::invalid_argument("Tonemap operator not defined");
+
+    if (func > TransferFunction_Max)
+        throw std::invalid_argument("Transfer function not defined");
+
+    // Create root signature.
     {
-        throw std::runtime_error("ToneMapPostProcess requires Feature Level 10.0 or later");
+        ENUM_FLAGS_CONSTEXPR D3D12_ROOT_SIGNATURE_FLAGS rootSignatureFlags =
+            D3D12_ROOT_SIGNATURE_FLAG_DENY_VERTEX_SHADER_ROOT_ACCESS
+            | D3D12_ROOT_SIGNATURE_FLAG_DENY_DOMAIN_SHADER_ROOT_ACCESS
+            | D3D12_ROOT_SIGNATURE_FLAG_DENY_GEOMETRY_SHADER_ROOT_ACCESS
+            | D3D12_ROOT_SIGNATURE_FLAG_DENY_HULL_SHADER_ROOT_ACCESS
+#ifdef _GAMING_XBOX_SCARLETT
+            | D3D12_ROOT_SIGNATURE_FLAG_DENY_AMPLIFICATION_SHADER_ROOT_ACCESS
+            | D3D12_ROOT_SIGNATURE_FLAG_DENY_MESH_SHADER_ROOT_ACCESS
+#endif
+            ;
+
+        const CD3DX12_DESCRIPTOR_RANGE textureSRVs(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0);
+
+        // Same as CommonStates::StaticPointClamp
+        const CD3DX12_STATIC_SAMPLER_DESC sampler(
+            0, // register
+            D3D12_FILTER_MIN_MAG_MIP_POINT,
+            D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
+            D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
+            D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
+            0.f,
+            16,
+            D3D12_COMPARISON_FUNC_LESS_EQUAL,
+            D3D12_STATIC_BORDER_COLOR_OPAQUE_WHITE,
+            0.f,
+            D3D12_FLOAT32_MAX,
+            D3D12_SHADER_VISIBILITY_PIXEL);
+
+        CD3DX12_ROOT_PARAMETER rootParameters[RootParameterIndex::RootParameterCount] = {};
+
+        const CD3DX12_DESCRIPTOR_RANGE texture1Range(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0);
+        rootParameters[RootParameterIndex::TextureSRV].InitAsDescriptorTable(1, &textureSRVs, D3D12_SHADER_VISIBILITY_PIXEL);
+
+        // Root parameter descriptor
+        CD3DX12_ROOT_SIGNATURE_DESC rsigDesc = {};
+
+        // Constant buffer
+        rootParameters[RootParameterIndex::ConstantBuffer].InitAsConstantBufferView(0, 0, D3D12_SHADER_VISIBILITY_PIXEL);
+
+        rsigDesc.Init(static_cast<UINT>(std::size(rootParameters)), rootParameters, 1, &sampler, rootSignatureFlags);
+
+        mRootSignature = mDeviceResources->GetRootSignature(rsigDesc);
     }
+
+    assert(mRootSignature != nullptr);
+
+    // Determine shader permutation.
+#if (defined(_XBOX_ONE) && defined(_TITLE)) || defined(_GAMING_XBOX)
+    int permutation = (mrt) ? 12 : 0;
+    permutation += (static_cast<int>(func) * static_cast<int>(Operator_Max)) + static_cast<int>(op);
+#else
+    UNREFERENCED_PARAMETER(mrt);
+    const int permutation = (static_cast<int>(func) * static_cast<int>(Operator_Max)) + static_cast<int>(op);
+#endif
+
+    assert(permutation >= 0 && permutation < ShaderPermutationCount);
+    _Analysis_assume_(permutation >= 0 && permutation < ShaderPermutationCount);
+
+    const int shaderIndex = pixelShaderIndices[permutation];
+    assert(shaderIndex >= 0 && shaderIndex < PixelShaderCount);
+    _Analysis_assume_(shaderIndex >= 0 && shaderIndex < PixelShaderCount);
+
+    // Create pipeline state.
+    const EffectPipelineStateDescription psd(nullptr,
+        CommonStates::Opaque,
+        CommonStates::DepthNone,
+        CommonStates::CullNone,
+        rtState,
+        D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE);
+
+    psd.CreatePipelineState(
+        device,
+        mRootSignature,
+        vertexShader,
+        pixelShaders[shaderIndex],
+        mPipelineState.GetAddressOf());
 
     memcpy(constants.colorRotation, c_from709to2020, sizeof(c_from709to2020));
 
-    SetDebugObjectName(mConstantBuffer.GetBuffer(), "ToneMapPostProcess");
+    SetDebugObjectName(mPipelineState.Get(), L"ToneMapPostProcess");
 }
 
 
 // Sets our state onto the D3D device.
-void ToneMapPostProcess::Impl::Process(
-    _In_ ID3D11DeviceContext* deviceContext,
-    const std::function<void __cdecl()>& setCustomState)
+void ToneMapPostProcess::Impl::Process(_In_ ID3D12GraphicsCommandList* commandList)
 {
+    // Set the root signature.
+    commandList->SetGraphicsRootSignature(mRootSignature);
+
     // Set the texture.
-    ID3D11ShaderResourceView* textures[1] = { hdrTexture.Get() };
-    deviceContext->PSSetShaderResources(0, 1, textures);
-
-    auto sampler = mDeviceResources->stateObjects.PointClamp();
-    deviceContext->PSSetSamplers(0, 1, &sampler);
-
-    // Set state objects.
-    deviceContext->OMSetBlendState(mDeviceResources->stateObjects.Opaque(), nullptr, 0xffffffff);
-    deviceContext->OMSetDepthStencilState(mDeviceResources->stateObjects.DepthNone(), 0);
-    deviceContext->RSSetState(mDeviceResources->stateObjects.CullNone());
-
-    // Set shaders.
-    auto vertexShader = mDeviceResources->GetVertexShader();
-    auto pixelShader = mDeviceResources->GetPixelShader(GetCurrentShaderPermutation());
-
-    deviceContext->VSSetShader(vertexShader, nullptr, 0);
-    deviceContext->PSSetShader(pixelShader, nullptr, 0);
+    if (!texture.ptr)
+    {
+        DebugTrace("ERROR: Missing texture for ToneMapPostProcess (texture %llu)\n", texture.ptr);
+        throw std::runtime_error("ToneMapPostProcess");
+    }
+    commandList->SetGraphicsRootDescriptorTable(RootParameterIndex::TextureSRV, texture);
 
     // Set constants.
     if (mDirtyFlags & Dirty_Parameters)
@@ -346,56 +430,31 @@ void ToneMapPostProcess::Impl::Process(
         constants.parameters = XMVectorSet(linearExposure, paperWhiteNits, 0.f, 0.f);
     }
 
-#if defined(_XBOX_ONE) && defined(_TITLE)
-    void *grfxMemory;
-    mConstantBuffer.SetData(deviceContext, constants, &grfxMemory);
-
-    ComPtr<ID3D11DeviceContextX> deviceContextX;
-    ThrowIfFailed(deviceContext->QueryInterface(IID_GRAPHICS_PPV_ARGS(deviceContextX.GetAddressOf())));
-
-    auto buffer = mConstantBuffer.GetBuffer();
-
-    deviceContextX->PSSetPlacementConstantBuffer(0, buffer, grfxMemory);
-#else
     if (mDirtyFlags & Dirty_ConstantBuffer)
     {
         mDirtyFlags &= ~Dirty_ConstantBuffer;
-        mConstantBuffer.SetData(deviceContext, constants);
+        mConstantBuffer = GraphicsMemory::Get(mDeviceResources->GetDevice()).AllocateConstant(constants);
     }
 
-    // Set the constant buffer.
-    auto buffer = mConstantBuffer.GetBuffer();
+    commandList->SetGraphicsRootConstantBufferView(RootParameterIndex::ConstantBuffer, mConstantBuffer.GpuAddress());
 
-    deviceContext->PSSetConstantBuffers(0, 1, &buffer);
-#endif
-
-    if (setCustomState)
-    {
-        setCustomState();
-    }
+    // Set the pipeline state.
+    commandList->SetPipelineState(mPipelineState.Get());
 
     // Draw quad.
-    deviceContext->IASetInputLayout(nullptr);
-    deviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-
-    deviceContext->Draw(3, 0);
-}
-
-
-int ToneMapPostProcess::Impl::GetCurrentShaderPermutation() const noexcept
-{
-#if defined(_XBOX_ONE) && defined(_TITLE)
-    int permutation = (mrt) ? 12 : 0;
-    return permutation + (static_cast<int>(func) * static_cast<int>(Operator_Max)) + static_cast<int>(op);
-#else
-    return (static_cast<int>(func) * static_cast<int>(Operator_Max)) + static_cast<int>(op);
-#endif
+    commandList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    commandList->DrawInstanced(3, 1, 0, 0);
 }
 
 
 // Public constructor.
-ToneMapPostProcess::ToneMapPostProcess(_In_ ID3D11Device* device)
-    : pImpl(std::make_unique<Impl>(device))
+#if (defined(_XBOX_ONE) && defined(_TITLE)) || defined(_GAMING_XBOX)
+ToneMapPostProcess::ToneMapPostProcess(_In_ ID3D12Device* device, const RenderTargetState& rtState, Operator op, TransferFunction func, bool mrt)
+    : pImpl(std::make_unique<Impl>(device, rtState, op, func, mrt))
+#else
+ToneMapPostProcess::ToneMapPostProcess(_In_ ID3D12Device* device, const RenderTargetState& rtState, Operator op, TransferFunction func)
+    : pImpl(std::make_unique<Impl>(device, rtState, op, func))
+#endif
 {
 }
 
@@ -406,45 +465,16 @@ ToneMapPostProcess::~ToneMapPostProcess() = default;
 
 
 // IPostProcess methods.
-void ToneMapPostProcess::Process(
-    _In_ ID3D11DeviceContext* deviceContext,
-    _In_ std::function<void __cdecl()> setCustomState)
+void ToneMapPostProcess::Process(_In_ ID3D12GraphicsCommandList* commandList)
 {
-    pImpl->Process(deviceContext, setCustomState);
+    pImpl->Process(commandList);
 }
-
-
-// Shader control.
-void ToneMapPostProcess::SetOperator(Operator op)
-{
-    if (op >= Operator_Max)
-        throw std::invalid_argument("Tonemap operator not defined");
-
-    pImpl->op = op;
-}
-
-
-void ToneMapPostProcess::SetTransferFunction(TransferFunction func)
-{
-    if (func >= TransferFunction_Max)
-        throw std::invalid_argument("Electro-optical transfer function not defined");
-
-    pImpl->func = func;
-}
-
-
-#if defined(_XBOX_ONE) && defined(_TITLE)
-void ToneMapPostProcess::SetMRTOutput(bool value)
-{
-    pImpl->mrt = value;
-}
-#endif
 
 
 // Properties
-void ToneMapPostProcess::SetHDRSourceTexture(_In_opt_ ID3D11ShaderResourceView* value)
+void ToneMapPostProcess::SetHDRSourceTexture(D3D12_GPU_DESCRIPTOR_HANDLE srvDescriptor)
 {
-    pImpl->hdrTexture = value;
+    pImpl->texture = srvDescriptor;
 }
 
 

@@ -2,7 +2,7 @@
 // File: XboxDDSTextureLoader.cpp
 //
 // Functions for loading a DDS texture using the XBOX extended header and creating a
-// Direct3D11.X runtime resource for it via the CreatePlacement APIs
+// Direct3D12.X runtime resource for it via the CreatePlacedResourceX API
 //
 // Note these functions will not load standard DDS files. Use the DDSTextureLoader
 // module in the DirectXTex package or as part of the DirectXTK library to load
@@ -11,8 +11,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 //
-// http://go.microsoft.com/fwlink/?LinkId=248926
-// http://go.microsoft.com/fwlink/?LinkId=248929
+// http://go.microsoft.com/fwlink/?LinkID=615561
 //--------------------------------------------------------------------------------------
 
 #include "pch.h"
@@ -23,7 +22,9 @@
 #include "DDS.h"
 #include "DirectXHelpers.h"
 
-#include <xdk.h>
+#ifdef _GAMING_XBOX
+#include <xmem.h>
+#endif
 
 using namespace DirectX;
 using namespace Xbox;
@@ -38,7 +39,11 @@ namespace
         0,
         XALLOC_MEMTYPE_GRAPHICS_WRITECOMBINE_GPU_READONLY,
         XALLOC_PAGESIZE_64KB,
-        XALLOC_ALIGNMENT_64K);
+        XALLOC_ALIGNMENT_64K
+#ifdef _GAMING_XBOX
+        , 0
+#endif
+        );
 
     //--------------------------------------------------------------------------------------
     HRESULT LoadTextureDataFromFile(_In_z_ const wchar_t* fileName,
@@ -64,29 +69,26 @@ namespace
         }
 
         // Get the file size
-        LARGE_INTEGER FileSize = {};
-
         FILE_STANDARD_INFO fileInfo;
         if (!GetFileInformationByHandleEx(hFile.get(), FileStandardInfo, &fileInfo, sizeof(fileInfo)))
         {
             return HRESULT_FROM_WIN32(GetLastError());
         }
-        FileSize = fileInfo.EndOfFile;
 
         // File is too big for 32-bit allocation, so reject read
-        if (FileSize.HighPart > 0)
+        if (fileInfo.EndOfFile.HighPart > 0)
         {
             return E_FAIL;
         }
 
         // Need at least enough data to fill the header and magic number to be a valid DDS
-        if (FileSize.LowPart < DDS_MIN_HEADER_SIZE)
+        if (fileInfo.EndOfFile.LowPart < DDS_MIN_HEADER_SIZE)
         {
             return E_FAIL;
         }
 
         // create enough space for the file data
-        ddsData.reset(new (std::nothrow) uint8_t[FileSize.LowPart]);
+        ddsData.reset(new (std::nothrow) uint8_t[fileInfo.EndOfFile.LowPart]);
         if (!ddsData)
         {
             return E_OUTOFMEMORY;
@@ -96,7 +98,7 @@ namespace
         DWORD BytesRead = 0;
         if (!ReadFile(hFile.get(),
             ddsData.get(),
-            FileSize.LowPart,
+            fileInfo.EndOfFile.LowPart,
             &BytesRead,
             nullptr
         ))
@@ -104,7 +106,7 @@ namespace
             return HRESULT_FROM_WIN32(GetLastError());
         }
 
-        if (BytesRead < FileSize.LowPart)
+        if (BytesRead < fileInfo.EndOfFile.LowPart)
         {
             return E_FAIL;
         }
@@ -134,7 +136,7 @@ namespace
         }
 
         // Must be long enough for both headers and magic value
-        if (FileSize.LowPart < DDS_XBOX_HEADER_SIZE)
+        if (fileInfo.EndOfFile.LowPart < DDS_XBOX_HEADER_SIZE)
         {
             return E_FAIL;
         }
@@ -143,7 +145,7 @@ namespace
         *header = hdr;
         auto offset = DDS_XBOX_HEADER_SIZE;
         *bitData = ddsData.get() + offset;
-        *bitSize = FileSize.LowPart - offset;
+        *bitSize = fileInfo.EndOfFile.LowPart - offset;
 
         return S_OK;
     }
@@ -180,7 +182,7 @@ namespace
     }
 
     //--------------------------------------------------------------------------------------
-    HRESULT CreateD3DResources(_In_ ID3D11DeviceX* d3dDevice,
+    HRESULT CreateD3DResources(_In_ ID3D12Device* device,
         _In_ const DDS_HEADER_XBOX* xboxext,
         _In_ uint32_t width,
         _In_ uint32_t height,
@@ -188,12 +190,10 @@ namespace
         _In_ uint32_t mipCount,
         _In_ uint32_t arraySize,
         _In_ bool forceSRGB,
-        _In_ bool isCubeMap,
         _In_ void* grfxMemory,
-        _Outptr_opt_ ID3D11Resource** texture,
-        _Outptr_opt_ ID3D11ShaderResourceView** textureView) noexcept
+        _Outptr_ ID3D12Resource** texture) noexcept
     {
-        if (!d3dDevice || !grfxMemory)
+        if (!device || !grfxMemory)
             return E_POINTER;
 
         HRESULT hr = E_FAIL;
@@ -204,200 +204,42 @@ namespace
             format = MakeSRGB(format);
         }
 
-        switch (xboxext->resourceDimension)
+        D3D12_RESOURCE_DESC desc = {};
+        desc.Width = static_cast<UINT>(width);
+        desc.Height = static_cast<UINT>(height);
+        desc.MipLevels = static_cast<UINT16>(mipCount);
+        desc.DepthOrArraySize = (xboxext->resourceDimension == D3D12_RESOURCE_DIMENSION_TEXTURE3D) ? static_cast<UINT16>(depth) : static_cast<UINT16>(arraySize);
+        desc.Format = format;
+        desc.Flags = D3D12_RESOURCE_FLAG_NONE;
+        desc.SampleDesc.Count = 1;
+        desc.SampleDesc.Quality = 0;
+        desc.Dimension = static_cast<D3D12_RESOURCE_DIMENSION>(xboxext->resourceDimension);
+        desc.Layout = static_cast<D3D12_TEXTURE_LAYOUT>((0x100 | xboxext->tileMode) & ~XBOX_TILEMODE_SCARLETT);
+
+        hr = device->CreatePlacedResourceX(
+            reinterpret_cast<D3D12_GPU_VIRTUAL_ADDRESS>(grfxMemory),
+            &desc,
+            D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+            nullptr,
+            IID_GRAPHICS_PPV_ARGS(texture));
+        if (SUCCEEDED(hr))
         {
-        case D3D11_RESOURCE_DIMENSION_TEXTURE1D:
-        {
-            D3D11_TEXTURE1D_DESC desc = {};
-            desc.Width = static_cast<UINT>(width);
-            desc.MipLevels = static_cast<UINT>(mipCount);
-            desc.ArraySize = static_cast<UINT>(arraySize);
-            desc.Format = format;
-            desc.Usage = D3D11_USAGE_DEFAULT;
-            desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-
-            ID3D11Texture1D* tex = nullptr;
-            hr = d3dDevice->CreatePlacementTexture1D(&desc, xboxext->tileMode, 0, grfxMemory, &tex);
-            if (SUCCEEDED(hr) && tex != 0)
-            {
-                if (textureView != 0)
-                {
-                    D3D11_SHADER_RESOURCE_VIEW_DESC SRVDesc = {};
-                    SRVDesc.Format = format;
-
-                    if (arraySize > 1)
-                    {
-                        SRVDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE1DARRAY;
-                        SRVDesc.Texture1DArray.MipLevels = desc.MipLevels;
-                        SRVDesc.Texture1DArray.ArraySize = static_cast<UINT>(arraySize);
-                    }
-                    else
-                    {
-                        SRVDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE1D;
-                        SRVDesc.Texture1D.MipLevels = desc.MipLevels;
-                    }
-
-                    hr = d3dDevice->CreateShaderResourceView(tex,
-                        &SRVDesc,
-                        textureView
-                    );
-                    if (FAILED(hr))
-                    {
-                        tex->Release();
-                        return hr;
-                    }
-                }
-
-                if (texture != 0)
-                {
-                    *texture = tex;
-                }
-                else
-                {
-                    SetDebugObjectName(tex, "XboxDDSTextureLoader");
-                    tex->Release();
-                }
-            }
-        }
-        break;
-
-        case D3D11_RESOURCE_DIMENSION_TEXTURE2D:
-        {
-            D3D11_TEXTURE2D_DESC desc = {};
-            desc.Width = static_cast<UINT>(width);
-            desc.Height = static_cast<UINT>(height);
-            desc.MipLevels = static_cast<UINT>(mipCount);
-            desc.ArraySize = static_cast<UINT>(arraySize);
-            desc.Format = format;
-            desc.SampleDesc.Count = 1;
-            desc.Usage = D3D11_USAGE_DEFAULT;
-            desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-            desc.MiscFlags = (isCubeMap) ? D3D11_RESOURCE_MISC_TEXTURECUBE : 0;
-
-            ID3D11Texture2D* tex = nullptr;
-            hr = d3dDevice->CreatePlacementTexture2D(&desc, xboxext->tileMode, 0, grfxMemory, &tex);
-            if (SUCCEEDED(hr) && tex != 0)
-            {
-                if (textureView != 0)
-                {
-                    D3D11_SHADER_RESOURCE_VIEW_DESC SRVDesc = {};
-                    SRVDesc.Format = format;
-
-                    if (isCubeMap)
-                    {
-                        if (arraySize > 6)
-                        {
-                            SRVDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURECUBEARRAY;
-                            SRVDesc.TextureCubeArray.MipLevels = desc.MipLevels;
-
-                            // Earlier we set arraySize to (NumCubes * 6)
-                            SRVDesc.TextureCubeArray.NumCubes = static_cast<UINT>(arraySize / 6);
-                        }
-                        else
-                        {
-                            SRVDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURECUBE;
-                            SRVDesc.TextureCube.MipLevels = desc.MipLevels;
-                        }
-                    }
-                    else if (arraySize > 1)
-                    {
-                        SRVDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2DARRAY;
-                        SRVDesc.Texture2DArray.MipLevels = desc.MipLevels;
-                        SRVDesc.Texture2DArray.ArraySize = static_cast<UINT>(arraySize);
-                    }
-                    else
-                    {
-                        SRVDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-                        SRVDesc.Texture2D.MipLevels = desc.MipLevels;
-                    }
-
-                    hr = d3dDevice->CreateShaderResourceView(tex,
-                        &SRVDesc,
-                        textureView
-                    );
-                    if (FAILED(hr))
-                    {
-                        tex->Release();
-                        return hr;
-                    }
-                }
-
-                if (texture != 0)
-                {
-                    *texture = tex;
-                }
-                else
-                {
-                    SetDebugObjectName(tex, "XboxDDSTextureLoader");
-                    tex->Release();
-                }
-            }
-        }
-        break;
-
-        case D3D11_RESOURCE_DIMENSION_TEXTURE3D:
-        {
-            D3D11_TEXTURE3D_DESC desc = {};
-            desc.Width = static_cast<UINT>(width);
-            desc.Height = static_cast<UINT>(height);
-            desc.Depth = static_cast<UINT>(depth);
-            desc.MipLevels = static_cast<UINT>(mipCount);
-            desc.Format = format;
-            desc.Usage = D3D11_USAGE_DEFAULT;
-            desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-
-            ID3D11Texture3D* tex = nullptr;
-            hr = d3dDevice->CreatePlacementTexture3D(&desc, xboxext->tileMode, 0, grfxMemory, &tex);
-            if (SUCCEEDED(hr) && tex != 0)
-            {
-                if (textureView != 0)
-                {
-                    D3D11_SHADER_RESOURCE_VIEW_DESC SRVDesc = {};
-                    SRVDesc.Format = format;
-
-                    SRVDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE3D;
-                    SRVDesc.Texture3D.MipLevels = desc.MipLevels;
-
-                    hr = d3dDevice->CreateShaderResourceView(tex,
-                        &SRVDesc,
-                        textureView
-                    );
-                    if (FAILED(hr))
-                    {
-                        tex->Release();
-                        return hr;
-                    }
-                }
-
-                if (texture != 0)
-                {
-                    *texture = tex;
-                }
-                else
-                {
-                    SetDebugObjectName(tex, "XboxDDSTextureLoader");
-                    tex->Release();
-                }
-            }
-        }
-        break;
-
-        default:
-            return HRESULT_FROM_WIN32(ERROR_NOT_SUPPORTED);
+            _Analysis_assume_(*texture != nullptr);
+            SetDebugObjectName(*texture, L"XboxDDSTextureLoader");
         }
 
         return hr;
     }
 
     //--------------------------------------------------------------------------------------
-    HRESULT CreateTextureFromDDS(_In_ ID3D11DeviceX* d3dDevice,
+    HRESULT CreateTextureFromDDS(_In_ ID3D12Device* device,
         _In_ const DDS_HEADER* header,
         _In_reads_bytes_(bitSize) const uint8_t* bitData,
         _In_ size_t bitSize,
         _In_ bool forceSRGB,
-        _Outptr_opt_ ID3D11Resource** texture,
-        _Outptr_opt_ ID3D11ShaderResourceView** textureView,
-        _Outptr_ void** grfxMemory) noexcept
+        _Outptr_ ID3D12Resource** texture,
+        _Outptr_ void** grfxMemory,
+        _Out_opt_ bool* outIsCubeMap) noexcept
     {
         HRESULT hr = S_OK;
 
@@ -420,13 +262,6 @@ namespace
 
         auto xboxext = reinterpret_cast<const DDS_HEADER_XBOX*>(reinterpret_cast<const uint8_t*>(header) + sizeof(DDS_HEADER));
 
-#ifndef NDEBUG
-        if (xboxext->xdkVer < _XDK_VER)
-        {
-            OutputDebugStringA("WARNING: DDS XBOX file may be outdated and need regeneration\n");
-        }
-#endif
-
         uint32_t arraySize = xboxext->arraySize;
         if (arraySize == 0)
         {
@@ -437,7 +272,7 @@ namespace
 
         switch (xboxext->resourceDimension)
         {
-        case D3D11_RESOURCE_DIMENSION_TEXTURE1D:
+        case D3D12_RESOURCE_DIMENSION_TEXTURE1D:
             if ((header->flags & DDS_HEIGHT) && height != 1)
             {
                 return HRESULT_FROM_WIN32(ERROR_INVALID_DATA);
@@ -445,8 +280,8 @@ namespace
             height = depth = 1;
             break;
 
-        case D3D11_RESOURCE_DIMENSION_TEXTURE2D:
-            if (xboxext->miscFlag & D3D11_RESOURCE_MISC_TEXTURECUBE)
+        case D3D12_RESOURCE_DIMENSION_TEXTURE2D:
+            if (xboxext->miscFlag & 0x4 /* RESOURCE_MISC_TEXTURECUBE */)
             {
                 arraySize *= 6;
                 isCubeMap = true;
@@ -454,7 +289,7 @@ namespace
             depth = 1;
             break;
 
-        case D3D11_RESOURCE_DIMENSION_TEXTURE3D:
+        case D3D12_RESOURCE_DIMENSION_TEXTURE3D:
             if (!(header->flags & DDS_HEADER_FLAGS_VOLUME))
             {
                 return HRESULT_FROM_WIN32(ERROR_INVALID_DATA);
@@ -474,6 +309,19 @@ namespace
         {
             return HRESULT_FROM_WIN32(ERROR_INVALID_DATA);
         }
+#if defined(_GAMING_XBOX_SCARLETT)
+        else if (!(xboxext->tileMode & XBOX_TILEMODE_SCARLETT))
+        {
+            DebugTrace("ERROR: XboxDDSTextureLoader for Scarlett cannot load textures tiled for Xbox One");
+            return HRESULT_FROM_WIN32(ERROR_NOT_SUPPORTED);
+        }
+#else
+        else if (xboxext->tileMode & XBOX_TILEMODE_SCARLETT)
+        {
+            DebugTrace("ERROR: XboxDDSTextureLoader for Xbox One cannot load textures tiled for Scarlett");
+            return HRESULT_FROM_WIN32(ERROR_NOT_SUPPORTED);
+        }
+#endif
 
         // Bound sizes
         if (mipCount > D3D11_REQ_MIP_LEVELS)
@@ -483,38 +331,38 @@ namespace
 
         switch (xboxext->resourceDimension)
         {
-        case D3D11_RESOURCE_DIMENSION_TEXTURE1D:
-            if ((arraySize > D3D11_REQ_TEXTURE1D_ARRAY_AXIS_DIMENSION) ||
-                (width > D3D11_REQ_TEXTURE1D_U_DIMENSION))
+        case D3D12_RESOURCE_DIMENSION_TEXTURE1D:
+            if ((arraySize > D3D12_REQ_TEXTURE1D_ARRAY_AXIS_DIMENSION) ||
+                (width > D3D12_REQ_TEXTURE1D_U_DIMENSION))
             {
                 return HRESULT_FROM_WIN32(ERROR_NOT_SUPPORTED);
             }
             break;
 
-        case D3D11_RESOURCE_DIMENSION_TEXTURE2D:
+        case D3D12_RESOURCE_DIMENSION_TEXTURE2D:
             if (isCubeMap)
             {
                 // This is the right bound because we set arraySize to (NumCubes*6) above
-                if ((arraySize > D3D11_REQ_TEXTURE2D_ARRAY_AXIS_DIMENSION) ||
-                    (width > D3D11_REQ_TEXTURECUBE_DIMENSION) ||
-                    (height > D3D11_REQ_TEXTURECUBE_DIMENSION))
+                if ((arraySize > D3D12_REQ_TEXTURE2D_ARRAY_AXIS_DIMENSION) ||
+                    (width > D3D12_REQ_TEXTURECUBE_DIMENSION) ||
+                    (height > D3D12_REQ_TEXTURECUBE_DIMENSION))
                 {
                     return HRESULT_FROM_WIN32(ERROR_NOT_SUPPORTED);
                 }
             }
-            else if ((arraySize > D3D11_REQ_TEXTURE2D_ARRAY_AXIS_DIMENSION) ||
-                (width > D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION) ||
-                (height > D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION))
+            else if ((arraySize > D3D12_REQ_TEXTURE2D_ARRAY_AXIS_DIMENSION) ||
+                (width > D3D12_REQ_TEXTURE2D_U_OR_V_DIMENSION) ||
+                (height > D3D12_REQ_TEXTURE2D_U_OR_V_DIMENSION))
             {
                 return HRESULT_FROM_WIN32(ERROR_NOT_SUPPORTED);
             }
             break;
 
-        case D3D11_RESOURCE_DIMENSION_TEXTURE3D:
+        case D3D12_RESOURCE_DIMENSION_TEXTURE3D:
             if ((arraySize > 1) ||
-                (width > D3D11_REQ_TEXTURE3D_U_V_OR_W_DIMENSION) ||
-                (height > D3D11_REQ_TEXTURE3D_U_V_OR_W_DIMENSION) ||
-                (depth > D3D11_REQ_TEXTURE3D_U_V_OR_W_DIMENSION))
+                (width > D3D12_REQ_TEXTURE3D_U_V_OR_W_DIMENSION) ||
+                (height > D3D12_REQ_TEXTURE3D_U_V_OR_W_DIMENSION) ||
+                (depth > D3D12_REQ_TEXTURE3D_U_V_OR_W_DIMENSION))
             {
                 return HRESULT_FROM_WIN32(ERROR_NOT_SUPPORTED);
             }
@@ -548,14 +396,19 @@ namespace
         memcpy(*grfxMemory, bitData, xboxext->dataSize);
 
         // Create the texture
-        hr = CreateD3DResources(d3dDevice, xboxext,
+        hr = CreateD3DResources(device, xboxext,
             width, height, depth, mipCount, arraySize,
-            forceSRGB, isCubeMap, *grfxMemory,
-            texture, textureView);
+            forceSRGB, *grfxMemory,
+            texture);
         if (FAILED(hr))
         {
-            XMemFree(grfxMemory, c_XMemAllocAttributes);
+            XMemFree(*grfxMemory, c_XMemAllocAttributes);
             *grfxMemory = nullptr;
+        }
+
+        if (outIsCubeMap)
+        {
+            *outIsCubeMap = isCubeMap;
         }
 
         return hr;
@@ -592,33 +445,36 @@ namespace
 //--------------------------------------------------------------------------------------
 _Use_decl_annotations_
 HRESULT Xbox::CreateDDSTextureFromMemory(
-    ID3D11DeviceX* d3dDevice,
+    ID3D12Device* device,
     const uint8_t* ddsData,
     size_t ddsDataSize,
-    ID3D11Resource** texture,
-    ID3D11ShaderResourceView** textureView,
+    ID3D12Resource** texture,
     void** grfxMemory,
     DDS_ALPHA_MODE* alphaMode,
-    bool forceSRGB ) noexcept
+    bool forceSRGB,
+    bool* isCubeMap ) noexcept
 {
-    if ( texture )
+    if (texture)
     {
         *texture = nullptr;
     }
-    if ( textureView )
-    {
-        *textureView = nullptr;
-    }
-    if ( grfxMemory )
+
+    if (grfxMemory)
     {
         *grfxMemory = nullptr;
     }
-    if ( alphaMode )
+
+    if (alphaMode)
     {
         *alphaMode = DDS_ALPHA_MODE_UNKNOWN;
     }
 
-    if ( !d3dDevice || !ddsData || (!texture && !textureView) || !grfxMemory )
+    if (isCubeMap)
+    {
+        *isCubeMap = false;
+    }
+
+    if ( !device || !ddsData || !texture || !grfxMemory )
     {
         return E_INVALIDARG;
     }
@@ -635,7 +491,7 @@ HRESULT Xbox::CreateDDSTextureFromMemory(
         return E_FAIL;
     }
 
-    auto header = reinterpret_cast<const DDS_HEADER*>(ddsData + sizeof(uint32_t));
+    auto header = reinterpret_cast<const DDS_HEADER*>(ddsData + sizeof( uint32_t ));
 
     // Verify header to validate DDS file
     if (header->size != sizeof(DDS_HEADER) ||
@@ -660,21 +516,13 @@ HRESULT Xbox::CreateDDSTextureFromMemory(
 
     auto offset = DDS_XBOX_HEADER_SIZE;
 
-    HRESULT hr = CreateTextureFromDDS( d3dDevice, header,
+    HRESULT hr = CreateTextureFromDDS( device, header,
                                        ddsData + offset, ddsDataSize - offset, forceSRGB,
-                                       texture, textureView,
-                                       grfxMemory );
+                                       texture, grfxMemory, isCubeMap );
     if ( SUCCEEDED(hr) )
     {
-        if (texture != 0 && *texture != 0)
-        {
-            SetDebugObjectName(*texture, "XboxDDSTextureLoader");
-        }
-
-        if (textureView != 0 && *textureView != 0)
-        {
-            SetDebugObjectName(*textureView, "XboxDDSTextureLoader");
-        }
+        _Analysis_assume_(*texture != nullptr);
+        SetDebugObjectName(*texture, L"XboxDDSTextureLoader");
 
         if ( alphaMode )
             *alphaMode = GetAlphaMode( header );
@@ -686,32 +534,35 @@ HRESULT Xbox::CreateDDSTextureFromMemory(
 //--------------------------------------------------------------------------------------
 _Use_decl_annotations_
 HRESULT Xbox::CreateDDSTextureFromFile(
-    ID3D11DeviceX* d3dDevice,
+    ID3D12Device* device,
     const wchar_t* fileName,
-    ID3D11Resource** texture,
-    ID3D11ShaderResourceView** textureView,
+    ID3D12Resource** texture,
     void** grfxMemory,
     DDS_ALPHA_MODE* alphaMode,
-    bool forceSRGB ) noexcept
+    bool forceSRGB,
+    bool* isCubeMap ) noexcept
 {
-    if ( texture )
+    if (texture)
     {
         *texture = nullptr;
     }
-    if ( textureView )
-    {
-        *textureView = nullptr;
-    }
-    if ( grfxMemory )
+
+    if (grfxMemory)
     {
         *grfxMemory = nullptr;
     }
-    if ( alphaMode )
+
+    if (alphaMode)
     {
         *alphaMode = DDS_ALPHA_MODE_UNKNOWN;
     }
 
-    if ( !d3dDevice || !fileName || (!texture && !textureView) || !grfxMemory )
+    if (isCubeMap)
+    {
+        *isCubeMap = false;
+    }
+
+    if ( !device || !fileName || !texture || !grfxMemory )
     {
         return E_INVALIDARG;
     }
@@ -732,21 +583,16 @@ HRESULT Xbox::CreateDDSTextureFromFile(
         return hr;
     }
 
-    hr = CreateTextureFromDDS( d3dDevice, header,
+    hr = CreateTextureFromDDS( device, header,
                                bitData, bitSize, forceSRGB,
-                               texture, textureView,
-                               grfxMemory );
+                               texture, grfxMemory, isCubeMap );
 
     if ( SUCCEEDED(hr) )
     {
 #if !defined(NO_D3D11_DEBUG_NAME) && ( defined(_DEBUG) || defined(PROFILE) )
-        if (texture != 0 && *texture != 0)
+        if (texture != nullptr && *texture != nullptr)
         {
             (*texture)->SetName( fileName );
-        }
-        if (textureView != 0 && *textureView != 0 )
-        {
-            (*textureView)->SetName( fileName );
         }
 #endif
 

@@ -4,7 +4,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 //
-// http://go.microsoft.com/fwlink/?LinkId=248929
+// http://go.microsoft.com/fwlink/?LinkID=615561
 //--------------------------------------------------------------------------------------
 
 #include "pch.h"
@@ -27,6 +27,7 @@ namespace
 
     static_assert((sizeof(DebugEffectConstants) % 16) == 0, "CB size not padded correctly");
 
+
     // Traits type describes our characteristics to the EffectBase template.
     struct DebugEffectTraits
     {
@@ -35,6 +36,7 @@ namespace
         static constexpr int VertexShaderCount = 8;
         static constexpr int PixelShaderCount = 4;
         static constexpr int ShaderPermutationCount = 32;
+        static constexpr int RootSignatureCount = 1;
     };
 }
 
@@ -42,7 +44,8 @@ namespace
 class DebugEffect::Impl : public EffectBase<DebugEffectTraits>
 {
 public:
-    explicit Impl(_In_ ID3D11Device* device);
+    Impl(_In_ ID3D12Device* device, uint32_t effectFlags, const EffectPipelineStateDescription& pipelineDescription,
+        DebugEffect::Mode debugMode);
 
     Impl(const Impl&) = delete;
     Impl& operator=(const Impl&) = delete;
@@ -50,14 +53,15 @@ public:
     Impl(Impl&&) = default;
     Impl& operator=(Impl&&) = default;
 
-    bool vertexColorEnabled;
-    bool biasedVertexNormals;
-    bool instancing;
-    DebugEffect::Mode debugMode;
+    enum RootParameterIndex
+    {
+        ConstantBuffer,
+        RootParameterCount
+    };
 
-    int GetCurrentShaderPermutation() const noexcept;
+    int GetPipelineStatePermutation(DebugEffect::Mode debugMode, uint32_t effectFlags) const noexcept;
 
-    void Apply(_In_ ID3D11DeviceContext* deviceContext);
+    void Apply(_In_ ID3D12GraphicsCommandList* commandList);
 };
 
 
@@ -65,7 +69,41 @@ public:
 // Include the precompiled shader code.
 namespace
 {
-#if defined(_XBOX_ONE) && defined(_TITLE)
+#ifdef _GAMING_XBOX_SCARLETT
+#include "XboxGamingScarlettDebugEffect_VSDebug.inc"
+#include "XboxGamingScarlettDebugEffect_VSDebugInst.inc"
+
+#include "XboxGamingScarlettDebugEffect_VSDebugVc.inc"
+#include "XboxGamingScarlettDebugEffect_VSDebugVcInst.inc"
+
+#include "XboxGamingScarlettDebugEffect_VSDebugBn.inc"
+#include "XboxGamingScarlettDebugEffect_VSDebugBnInst.inc"
+
+#include "XboxGamingScarlettDebugEffect_VSDebugVcBn.inc"
+#include "XboxGamingScarlettDebugEffect_VSDebugVcBnInst.inc"
+
+#include "XboxGamingScarlettDebugEffect_PSHemiAmbient.inc"
+#include "XboxGamingScarlettDebugEffect_PSRGBNormals.inc"
+#include "XboxGamingScarlettDebugEffect_PSRGBTangents.inc"
+#include "XboxGamingScarlettDebugEffect_PSRGBBiTangents.inc"
+#elif defined(_GAMING_XBOX)
+#include "XboxGamingXboxOneDebugEffect_VSDebug.inc"
+#include "XboxGamingXboxOneDebugEffect_VSDebugInst.inc"
+
+#include "XboxGamingXboxOneDebugEffect_VSDebugVc.inc"
+#include "XboxGamingXboxOneDebugEffect_VSDebugVcInst.inc"
+
+#include "XboxGamingXboxOneDebugEffect_VSDebugBn.inc"
+#include "XboxGamingXboxOneDebugEffect_VSDebugBnInst.inc"
+
+#include "XboxGamingXboxOneDebugEffect_VSDebugVcBn.inc"
+#include "XboxGamingXboxOneDebugEffect_VSDebugVcBnInst.inc"
+
+#include "XboxGamingXboxOneDebugEffect_PSHemiAmbient.inc"
+#include "XboxGamingXboxOneDebugEffect_PSRGBNormals.inc"
+#include "XboxGamingXboxOneDebugEffect_PSRGBTangents.inc"
+#include "XboxGamingXboxOneDebugEffect_PSRGBBiTangents.inc"
+#elif defined(_XBOX_ONE) && defined(_TITLE)
 #include "XboxOneDebugEffect_VSDebug.inc"
 #include "XboxOneDebugEffect_VSDebugInst.inc"
 
@@ -104,7 +142,7 @@ namespace
 
 
 template<>
-const ShaderBytecode EffectBase<DebugEffectTraits>::VertexShaderBytecode[] =
+const D3D12_SHADER_BYTECODE EffectBase<DebugEffectTraits>::VertexShaderBytecode[] =
 {
     { DebugEffect_VSDebug,         sizeof(DebugEffect_VSDebug)         },
     { DebugEffect_VSDebugVc,       sizeof(DebugEffect_VSDebugVc)       },
@@ -158,12 +196,11 @@ const int EffectBase<DebugEffectTraits>::VertexShaderIndices[] =
     7,      // instancing + vertex color (biased vertex normal)
     7,      // instancing + vertex color (biased vertex normal) + normals
     7,      // instancing + vertex color (biased vertex normal) + tangents
-    7,      // instancing + vertex color (biased vertex normal) + bitangents
+    7,      // instancing + vertex color (biased vertex normal) + bitangents};
 };
 
-
 template<>
-const ShaderBytecode EffectBase<DebugEffectTraits>::PixelShaderBytecode[] =
+const D3D12_SHADER_BYTECODE EffectBase<DebugEffectTraits>::PixelShaderBytecode[] =
 {
     { DebugEffect_PSHemiAmbient,    sizeof(DebugEffect_PSHemiAmbient)   },
     { DebugEffect_PSRGBNormals,     sizeof(DebugEffect_PSRGBNormals)    },
@@ -219,22 +256,17 @@ const int EffectBase<DebugEffectTraits>::PixelShaderIndices[] =
 
 // Global pool of per-deviceDebugEffect resources.
 template<>
-SharedResourcePool<ID3D11Device*, EffectBase<DebugEffectTraits>::DeviceResources> EffectBase<DebugEffectTraits>::deviceResourcesPool = {};
+SharedResourcePool<ID3D12Device*, EffectBase<DebugEffectTraits>::DeviceResources> EffectBase<DebugEffectTraits>::deviceResourcesPool = {};
 
 
 // Constructor.
-DebugEffect::Impl::Impl(_In_ ID3D11Device* device)
-    : EffectBase(device),
-    vertexColorEnabled(false),
-    biasedVertexNormals(false),
-    instancing(false),
-    debugMode(DebugEffect::Mode_Default)
+DebugEffect::Impl::Impl(
+    _In_ ID3D12Device* device,
+    uint32_t effectFlags,
+    const EffectPipelineStateDescription& pipelineDescription,
+    DebugEffect::Mode debugMode)
+    : EffectBase(device)
 {
-    if (device->GetFeatureLevel() < D3D_FEATURE_LEVEL_10_0)
-    {
-        throw std::runtime_error("DebugEffect requires Feature Level 10.0 or later");
-    }
-
     static_assert(static_cast<int>(std::size(EffectBase<DebugEffectTraits>::VertexShaderIndices)) == DebugEffectTraits::ShaderPermutationCount, "array/max mismatch");
     static_assert(static_cast<int>(std::size(EffectBase<DebugEffectTraits>::VertexShaderBytecode)) == DebugEffectTraits::VertexShaderCount, "array/max mismatch");
     static_assert(static_cast<int>(std::size(EffectBase<DebugEffectTraits>::PixelShaderBytecode)) == DebugEffectTraits::PixelShaderCount, "array/max mismatch");
@@ -244,26 +276,74 @@ DebugEffect::Impl::Impl(_In_ ID3D11Device* device)
 
     constants.ambientDownAndAlpha = s_lower;
     constants.ambientRange = g_XMOne;
+
+    // Create root signature.
+    {
+        ENUM_FLAGS_CONSTEXPR D3D12_ROOT_SIGNATURE_FLAGS rootSignatureFlags =
+            D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT
+            | D3D12_ROOT_SIGNATURE_FLAG_DENY_DOMAIN_SHADER_ROOT_ACCESS
+            | D3D12_ROOT_SIGNATURE_FLAG_DENY_GEOMETRY_SHADER_ROOT_ACCESS
+            | D3D12_ROOT_SIGNATURE_FLAG_DENY_HULL_SHADER_ROOT_ACCESS
+#ifdef _GAMING_XBOX_SCARLETT
+            | D3D12_ROOT_SIGNATURE_FLAG_DENY_AMPLIFICATION_SHADER_ROOT_ACCESS
+            | D3D12_ROOT_SIGNATURE_FLAG_DENY_MESH_SHADER_ROOT_ACCESS
+#endif
+            ;
+
+        // Create root parameters and initialize first (constants)
+        CD3DX12_ROOT_PARAMETER rootParameters[RootParameterIndex::RootParameterCount] = {};
+        rootParameters[RootParameterIndex::ConstantBuffer].InitAsConstantBufferView(0, 0, D3D12_SHADER_VISIBILITY_ALL);
+
+        // Root parameter descriptor - conditionally initialized
+        CD3DX12_ROOT_SIGNATURE_DESC rsigDesc = {};
+
+        rsigDesc.Init(1, rootParameters, 0, nullptr, rootSignatureFlags);
+
+        mRootSignature = GetRootSignature(0, rsigDesc);
+    }
+
+    assert(mRootSignature != nullptr);
+
+    // Create pipeline state.
+    const int sp = GetPipelineStatePermutation(debugMode, effectFlags);
+    assert(sp >= 0 && sp < DebugEffectTraits::ShaderPermutationCount);
+    _Analysis_assume_(sp >= 0 && sp < DebugEffectTraits::ShaderPermutationCount);
+
+    const int vi = EffectBase<DebugEffectTraits>::VertexShaderIndices[sp];
+    assert(vi >= 0 && vi < DebugEffectTraits::VertexShaderCount);
+    _Analysis_assume_(vi >= 0 && vi < DebugEffectTraits::VertexShaderCount);
+    const int pi = EffectBase<DebugEffectTraits>::PixelShaderIndices[sp];
+    assert(pi >= 0 && pi < DebugEffectTraits::PixelShaderCount);
+    _Analysis_assume_(pi >= 0 && pi < DebugEffectTraits::PixelShaderCount);
+
+    pipelineDescription.CreatePipelineState(
+        device,
+        mRootSignature,
+        EffectBase<DebugEffectTraits>::VertexShaderBytecode[vi],
+        EffectBase<DebugEffectTraits>::PixelShaderBytecode[pi],
+        mPipelineState.GetAddressOf());
+
+    SetDebugObjectName(mPipelineState.Get(), L"DebugEffect");
 }
 
 
-int DebugEffect::Impl::GetCurrentShaderPermutation() const noexcept
+int DebugEffect::Impl::GetPipelineStatePermutation(DebugEffect::Mode debugMode, uint32_t effectFlags) const noexcept
 {
     int permutation = static_cast<int>(debugMode);
 
     // Support vertex coloring?
-    if (vertexColorEnabled)
+    if (effectFlags & EffectFlags::VertexColor)
     {
         permutation += 4;
     }
 
-    if (biasedVertexNormals)
+    if (effectFlags & EffectFlags::BiasedVertexNormals)
     {
         // Compressed normals need to be scaled and biased in the vertex shader.
         permutation += 8;
     }
 
-    if (instancing)
+    if (effectFlags & EffectFlags::Instancing)
     {
         // Vertex shader needs to use vertex matrix transform.
         permutation += 16;
@@ -274,10 +354,8 @@ int DebugEffect::Impl::GetCurrentShaderPermutation() const noexcept
 
 
 // Sets our state onto the D3D device.
-void DebugEffect::Impl::Apply(_In_ ID3D11DeviceContext* deviceContext)
+void DebugEffect::Impl::Apply(_In_ ID3D12GraphicsCommandList* commandList)
 {
-    assert(deviceContext != nullptr);
-
     // Compute derived parameter values.
     matrices.SetConstants(dirtyFlags, constants.worldViewProj);
 
@@ -296,14 +374,26 @@ void DebugEffect::Impl::Apply(_In_ ID3D11DeviceContext* deviceContext)
         dirtyFlags |= EffectDirtyFlags::ConstantBuffer;
     }
 
-    // Set shaders and constant buffers.
-    ApplyShaders(deviceContext, GetCurrentShaderPermutation());
+    UpdateConstants();
+
+    // Set the root signature
+    commandList->SetGraphicsRootSignature(mRootSignature);
+
+    // Set constants
+    commandList->SetGraphicsRootConstantBufferView(RootParameterIndex::ConstantBuffer, GetConstantBufferGpuAddress());
+
+    // Set the pipeline state
+    commandList->SetPipelineState(EffectBase::mPipelineState.Get());
 }
 
 
 // Public constructor.
-DebugEffect::DebugEffect(_In_ ID3D11Device* device)
-    : pImpl(std::make_unique<Impl>(device))
+DebugEffect::DebugEffect(
+    _In_ ID3D12Device* device,
+    uint32_t effectFlags,
+    const EffectPipelineStateDescription& pipelineDescription,
+    Mode debugMode)
+    : pImpl(std::make_unique<Impl>(device, effectFlags, pipelineDescription, debugMode))
 {
 }
 
@@ -314,15 +404,9 @@ DebugEffect::~DebugEffect() = default;
 
 
 // IEffect methods.
-void DebugEffect::Apply(_In_ ID3D11DeviceContext* deviceContext)
+void DebugEffect::Apply(_In_ ID3D12GraphicsCommandList* commandList)
 {
-    pImpl->Apply(deviceContext);
-}
-
-
-void DebugEffect::GetVertexShaderBytecode(_Out_ void const** pShaderByteCode, _Out_ size_t* pByteCodeLength)
-{
-    pImpl->GetVertexShaderBytecode(pImpl->GetCurrentShaderPermutation(), pShaderByteCode, pByteCodeLength);
+    pImpl->Apply(commandList);
 }
 
 
@@ -362,16 +446,6 @@ void XM_CALLCONV DebugEffect::SetMatrices(FXMMATRIX world, CXMMATRIX view, CXMMA
 
 
 // Material settings.
-void DebugEffect::SetMode(Mode debugMode)
-{
-    if (static_cast<int>(debugMode) < 0 || static_cast<int>(debugMode) >= DebugEffectTraits::PixelShaderCount)
-    {
-        throw std::invalid_argument("Unsupported mode");
-    }
-
-    pImpl->debugMode = debugMode;
-}
-
 void XM_CALLCONV DebugEffect::SetHemisphericalAmbientColor(FXMVECTOR upper, FXMVECTOR lower)
 {
     // Set xyz to new value, but preserve existing w (alpha).
@@ -388,25 +462,4 @@ void DebugEffect::SetAlpha(float value)
     pImpl->constants.ambientDownAndAlpha = XMVectorSetW(pImpl->constants.ambientDownAndAlpha, value);
 
     pImpl->dirtyFlags |= EffectDirtyFlags::ConstantBuffer;
-}
-
-
-// Vertex color setting.
-void DebugEffect::SetVertexColorEnabled(bool value)
-{
-    pImpl->vertexColorEnabled = value;
-}
-
-
-// Normal compression settings.
-void DebugEffect::SetBiasedVertexNormals(bool value)
-{
-    pImpl->biasedVertexNormals = value;
-}
-
-
-// Instancing settings.
-void DebugEffect::SetInstancingEnabled(bool value)
-{
-    pImpl->instancing = value;
 }

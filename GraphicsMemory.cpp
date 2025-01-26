@@ -4,234 +4,253 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 //
-// http://go.microsoft.com/fwlink/?LinkId=248929
+// http://go.microsoft.com/fwlink/?LinkID=615561
 //--------------------------------------------------------------------------------------
 
 #include "pch.h"
-
 #include "GraphicsMemory.h"
-#include "DirectXHelpers.h"
 #include "PlatformHelpers.h"
+#include "LinearAllocator.h"
+
+#ifdef USING_PIX_CUSTOM_MEMORY_EVENTS
+#include <pix3.h>
+#include <pixmemory.h>
+#endif
 
 using namespace DirectX;
 using Microsoft::WRL::ComPtr;
+using ScopedLock = std::lock_guard<std::mutex>;
 
-
-#if defined(_XBOX_ONE) && defined(_TITLE)
-
-//======================================================================================
-// Xbox One Direct3D 11.x
-//======================================================================================
-
-class GraphicsMemory::Impl
+namespace
 {
-public:
-    Impl(GraphicsMemory* owner) :
-        mOwner(owner),
-        mCurrentFrame(0)
-    {
-        if (s_graphicsMemory)
-        {
-            throw std::logic_error("GraphicsMemory is a singleton");
-        }
+    constexpr size_t MinPageSize = 64 * 1024;
+    constexpr size_t MinAllocSize = 4 * 1024;
+    constexpr size_t AllocatorIndexShift = 12; // start block sizes at 4KB
+    constexpr size_t AllocatorPoolCount = 21; // allocation sizes up to 2GB supported
+    constexpr size_t PoolIndexScale = 1; // multiply the allocation size this amount to push large values into the next bucket
 
-        s_graphicsMemory = this;
+    static_assert((1 << AllocatorIndexShift) == MinAllocSize, "1 << AllocatorIndexShift must == MinPageSize (in KiB)");
+    static_assert((MinPageSize & (MinPageSize - 1)) == 0, "MinPageSize size must be a power of 2");
+    static_assert((MinAllocSize & (MinAllocSize - 1)) == 0, "MinAllocSize size must be a power of 2");
+    static_assert(MinAllocSize >= (4 * 1024), "MinAllocSize size must be greater than 4K");
+
+    constexpr size_t NextPow2(size_t x) noexcept
+    {
+        x--;
+        x |= x >> 1;
+        x |= x >> 2;
+        x |= x >> 4;
+        x |= x >> 8;
+        x |= x >> 16;
+    #ifdef _WIN64
+        x |= x >> 32;
+    #endif
+        return ++x;
     }
 
-    ~Impl()
+    inline size_t GetPoolIndexFromSize(size_t x) noexcept
     {
-        if (mDevice && mDeviceContext)
-        {
-            UINT64 finalFence = mDeviceContext->InsertFence(0);
+        const size_t allocatorPageSize = x >> AllocatorIndexShift;
+        // gives a value from range:
+        // 0 - sub-4k allocator
+        // 1 - 4k allocator
+        // 2 - 8k allocator
+        // 4 - 16k allocator
+        // etc...
+        // Need to convert to an index.
 
-            while (mDevice->IsFencePending(finalFence))
+    #ifdef _MSC_VER
+        unsigned long bitIndex = 0;
+
+    #ifdef _WIN64
+        return _BitScanForward64(&bitIndex, allocatorPageSize) ? bitIndex + 1 : 0;
+    #else
+        return _BitScanForward(&bitIndex, static_cast<unsigned long>(allocatorPageSize)) ? bitIndex + 1 : 0;
+    #endif
+
+    #elif defined(__GNUC__)
+
+    #ifdef __LP64__
+        return static_cast<size_t>(__builtin_ffsll(static_cast<long long>(allocatorPageSize)));
+    #else
+        return static_cast<size_t>(__builtin_ffs(static_cast<int>(allocatorPageSize)));
+    #endif
+
+    #else
+    #error Unknown forward bit-scan syntax
+    #endif
+    }
+
+    inline size_t GetPageSizeFromPoolIndex(size_t x) noexcept
+    {
+        x = (x == 0) ? 0 : x - 1; // clamp to zero
+        return std::max<size_t>(MinPageSize, size_t(1) << (x + AllocatorIndexShift));
+    }
+
+    //--------------------------------------------------------------------------------------
+    // DeviceAllocator : honors memory requests associated with a particular device
+    //--------------------------------------------------------------------------------------
+    class DeviceAllocator
+    {
+    public:
+        DeviceAllocator(_In_ ID3D12Device* device) noexcept(false)
+            : mDevice(device)
+        {
+            if (!device)
+                throw std::invalid_argument("Invalid device parameter");
+
+            for (size_t i = 0; i < mPools.size(); ++i)
             {
-                SwitchToThread();
+                size_t pageSize = GetPageSizeFromPoolIndex(i);
+                mPools[i] = std::make_unique<LinearAllocator>(
+                    mDevice.Get(),
+                    pageSize);
             }
-
-            mDeviceContext.Reset();
-            mDevice.Reset();
         }
 
-        s_graphicsMemory = nullptr;
-    }
+        DeviceAllocator(DeviceAllocator&&) = delete;
+        DeviceAllocator& operator= (DeviceAllocator&&) = delete;
 
-    Impl(const Impl&) = delete;
-    Impl& operator=(const Impl&) = delete;
+        DeviceAllocator(DeviceAllocator const&) = delete;
+        DeviceAllocator& operator= (DeviceAllocator const&) = delete;
 
-    Impl(Impl&&) = default;
-    Impl& operator=(Impl&&) = default;
-
-    void Initialize(_In_ ID3D11DeviceX* device, unsigned int backBufferCount)
-    {
-        assert(device != nullptr);
-        mDevice = device;
-
-        device->GetImmediateContextX(mDeviceContext.GetAddressOf());
-
-        mFrames.resize(backBufferCount);
-    }
-
-    void* Allocate(_In_opt_ ID3D11DeviceContext* deviceContext, size_t size, int alignment)
-    {
-        // Currently use a single global allocator instead of a per-context allocator
-        UNREFERENCED_PARAMETER(deviceContext);
-
-        std::lock_guard<std::mutex> lock(mGuard);
-
-        return mFrames[mCurrentFrame].Allocate(size, alignment);
-    }
-
-    void Commit()
-    {
-        std::lock_guard<std::mutex> lock(mGuard);
-
-        mFrames[mCurrentFrame].mFence = mDeviceContext->InsertFence(D3D11_INSERT_FENCE_NO_KICKOFF);
-
-        ++mCurrentFrame;
-        if (mCurrentFrame >= mFrames.size())
+        // Explicitly destroy LinearAllocators inside a critical section
+        ~DeviceAllocator()
         {
-            mCurrentFrame = 0;
-        }
+            const ScopedLock lock(mMutex);
 
-        mFrames[mCurrentFrame].WaitOnFence(mDevice.Get());
-
-        mFrames[mCurrentFrame].Clear();
-    }
-
-    GraphicsMemory*  mOwner;
-
-    std::mutex mGuard;
-
-    struct MemoryPage
-    {
-        MemoryPage() noexcept : mPageSize(0), mGrfxMemory(nullptr) {}
-
-        void Initialize(size_t reqSize)
-        {
-            mPageSize = 0x100000; // 1 MB general pages for Xbox One
-            if (mPageSize < reqSize)
+            for (auto& allocator : mPools)
             {
-                mPageSize = AlignUp(reqSize, 65536);
+                allocator.reset();
             }
+        }
 
-            mGrfxMemory = VirtualAlloc(nullptr, mPageSize,
-                MEM_LARGE_PAGES | MEM_GRAPHICS | MEM_RESERVE | MEM_COMMIT,
-                PAGE_WRITECOMBINE | PAGE_READWRITE | PAGE_GPU_READONLY);
-            if (!mGrfxMemory)
+        GraphicsResource Alloc(_In_ size_t size, _In_ size_t alignment)
+        {
+            ScopedLock lock(mMutex);
+
+            // Which memory pool does it live in?
+            const size_t poolSize = NextPow2((alignment + size) * PoolIndexScale);
+            const size_t poolIndex = GetPoolIndexFromSize(poolSize);
+            assert(poolIndex < mPools.size());
+
+            // If the allocator isn't initialized yet, do so now
+            auto& allocator = mPools[poolIndex];
+            assert(allocator != nullptr);
+            assert(poolSize < MinPageSize || poolSize == allocator->PageSize());
+
+            auto page = allocator->FindPageForAlloc(size, alignment);
+            if (!page)
+            {
+                DebugTrace("GraphicsMemory failed to allocate page (%zu requested bytes, %zu alignment)\n", size, alignment);
                 throw std::bad_alloc();
+            }
+
+            size_t offset = page->Suballocate(size, alignment);
+
+            // Return the information to the user
+            return GraphicsResource(
+                page,
+                page->GpuAddress() + offset,
+                page->UploadResource(),
+                static_cast<BYTE*>(page->BaseMemory()) + offset,
+                offset,
+                size);
         }
 
-        size_t mPageSize;
-        void* mGrfxMemory;
+        // Submit page fences to the command queue
+        void KickFences(_In_ ID3D12CommandQueue* commandQueue)
+        {
+            ScopedLock lock(mMutex);
+
+            for (auto& i : mPools)
+            {
+                if (i)
+                {
+                    i->RetirePendingPages();
+                    i->FenceCommittedPages(commandQueue);
+                }
+            }
+        }
+
+        void GarbageCollect()
+        {
+            ScopedLock lock(mMutex);
+
+            for (auto& i : mPools)
+            {
+                if (i)
+                {
+                    i->Shrink();
+                }
+            }
+        }
+
+        void GetStatistics(GraphicsMemoryStatistics& stats) const
+        {
+            size_t totalPageCount = 0;
+            size_t committedMemoryUsage = 0;
+            size_t totalMemoryUsage = 0;
+
+            ScopedLock lock(mMutex);
+
+            for (auto& i : mPools)
+            {
+                if (i)
+                {
+                    totalPageCount += i->TotalPageCount();
+                    committedMemoryUsage += i->CommittedMemoryUsage();
+                    totalMemoryUsage += i->TotalMemoryUsage();
+                }
+            }
+
+            stats = {};
+            stats.committedMemory = committedMemoryUsage;
+            stats.totalMemory = totalMemoryUsage;
+            stats.totalPages = totalPageCount;
+        }
+
+    #if !(defined(_XBOX_ONE) && defined(_TITLE)) && !defined(_GAMING_XBOX)
+        ID3D12Device* GetDevice() const noexcept { return mDevice.Get(); }
+    #endif
+
+    private:
+        ComPtr<ID3D12Device> mDevice;
+        std::array<std::unique_ptr<LinearAllocator>, AllocatorPoolCount> mPools;
+        mutable std::mutex mMutex;
     };
 
-    struct MemoryFrame
-    {
-        MemoryFrame() noexcept : mCurOffset(0), mFence(0) {}
+#ifdef USING_PIX_CUSTOM_MEMORY_EVENTS
+    constexpr uint16_t c_PIXAllocatorID = 1001;
+#endif
+} // anonymous namespace
 
-        ~MemoryFrame() { Clear(); }
 
-        UINT mCurOffset;
-
-        UINT64 mFence;
-
-        void* Allocate(size_t size, size_t alignment)
-        {
-            size_t alignedSize = AlignUp(size, alignment);
-
-            if (mPages.empty())
-            {
-                MemoryPage newPage;
-                newPage.Initialize(alignedSize);
-
-                mCurOffset = 0;
-
-                mPages.emplace_back(newPage);
-            }
-            else
-            {
-                mCurOffset = AlignUp(mCurOffset, alignment);
-
-                if (mCurOffset + alignedSize > mPages.front().mPageSize)
-                {
-                    MemoryPage newPage;
-                    newPage.Initialize(alignedSize);
-
-                    mCurOffset = 0;
-
-                    mPages.emplace_front(newPage);
-                }
-            }
-
-            void* ptr = static_cast<uint8_t*>(mPages.front().mGrfxMemory) + mCurOffset;
-
-            mCurOffset += static_cast<UINT>(alignedSize);
-
-            return ptr;
-        }
-
-        void WaitOnFence(ID3D11DeviceX* device)
-        {
-            if (mFence)
-            {
-                while (device->IsFencePending(mFence))
-                {
-                    SwitchToThread();
-                }
-
-                mFence = 0;
-            }
-        }
-
-        void Clear()
-        {
-            for (auto& it : mPages)
-            {
-                if (it.mGrfxMemory)
-                {
-                    VirtualFree(it.mGrfxMemory, 0, MEM_RELEASE);
-                    it.mGrfxMemory = nullptr;
-                }
-            }
-
-            mPages.clear();
-
-            mCurOffset = 0;
-        }
-
-        std::list<MemoryPage> mPages;
-    };
-
-    UINT mCurrentFrame;
-    std::vector<MemoryFrame> mFrames;
-
-    ComPtr<ID3D11DeviceX> mDevice;
-    ComPtr<ID3D11DeviceContextX> mDeviceContext;
-
-    static GraphicsMemory::Impl* s_graphicsMemory;
-};
-
-GraphicsMemory::Impl* GraphicsMemory::Impl::s_graphicsMemory = nullptr;
-
-#else
-
-//======================================================================================
-// Null allocator for standard Direct3D
-//======================================================================================
+//--------------------------------------------------------------------------------------
+// GraphicsMemory::Impl
+//--------------------------------------------------------------------------------------
 
 class GraphicsMemory::Impl
 {
 public:
-    Impl(GraphicsMemory* owner) :
-        mOwner(owner)
+    Impl(GraphicsMemory* owner) noexcept(false)
+        : mOwner(owner)
+        , m_peakCommited(0)
+        , m_peakBytes(0)
+        , m_peakPages(0)
     {
+    #if (defined(_XBOX_ONE) && defined(_TITLE)) || defined(_GAMING_XBOX)
         if (s_graphicsMemory)
         {
             throw std::logic_error("GraphicsMemory is a singleton");
         }
 
         s_graphicsMemory = this;
+
+    #endif
+    #ifdef USING_PIX_CUSTOM_MEMORY_EVENTS
+        DebugTrace("INFO: GraphicsMemory PIX custom memory tracking events enabled (Allocator ID %u)\n", c_PIXAllocatorID);
+    #endif
     }
 
     Impl(Impl&&) = default;
@@ -242,52 +261,106 @@ public:
 
     ~Impl()
     {
+    #if (defined(_XBOX_ONE) && defined(_TITLE)) || defined(_GAMING_XBOX)
         s_graphicsMemory = nullptr;
+    #else
+        if (mDeviceAllocator && mDeviceAllocator->GetDevice())
+        {
+            s_graphicsMemory.erase(mDeviceAllocator->GetDevice());
+        }
+    #endif
+        mDeviceAllocator.reset();
     }
 
-    void Initialize(_In_ ID3D11Device* device, unsigned int backBufferCount) noexcept
+    void Initialize(_In_ ID3D12Device* device)
     {
-        UNREFERENCED_PARAMETER(device);
-        UNREFERENCED_PARAMETER(backBufferCount);
+        mDeviceAllocator = std::make_unique<DeviceAllocator>(device);
+
+    #if !(defined(_XBOX_ONE) && defined(_TITLE)) && !defined(_GAMING_XBOX)
+        if (s_graphicsMemory.find(device) != s_graphicsMemory.cend())
+        {
+            throw std::logic_error("GraphicsMemory is a per-device singleton");
+        }
+        s_graphicsMemory[device] = this;
+    #endif
     }
 
-    void* Allocate(_In_opt_ ID3D11DeviceContext* context, size_t size, int alignment) noexcept
+    GraphicsResource Allocate(size_t size, size_t alignment)
     {
-        UNREFERENCED_PARAMETER(context);
-        UNREFERENCED_PARAMETER(size);
-        UNREFERENCED_PARAMETER(alignment);
-        return nullptr;
+        return mDeviceAllocator->Alloc(size, alignment);
     }
 
-    void Commit() noexcept
+    void Commit(_In_ ID3D12CommandQueue* commandQueue)
     {
+        mDeviceAllocator->KickFences(commandQueue);
     }
 
-    GraphicsMemory*  mOwner;
+    void GarbageCollect()
+    {
+        mDeviceAllocator->GarbageCollect();
+    }
 
+    void GetStatistics(GraphicsMemoryStatistics& stats)
+    {
+        mDeviceAllocator->GetStatistics(stats);
+
+        if (stats.committedMemory > m_peakCommited)
+        {
+            m_peakCommited = stats.committedMemory;
+        }
+        stats.peakCommitedMemory = m_peakCommited;
+
+        if (stats.totalMemory > m_peakBytes)
+        {
+            m_peakBytes = stats.totalMemory;
+        }
+        stats.peakTotalMemory = m_peakBytes;
+
+        if (stats.totalPages > m_peakPages)
+        {
+            m_peakPages = stats.totalPages;
+        }
+        stats.peakTotalPages = m_peakPages;
+    }
+
+    void ResetStatistics()
+    {
+        m_peakCommited = 0;
+        m_peakBytes = 0;
+        m_peakPages = 0;
+    }
+
+    GraphicsMemory* mOwner;
+#if (defined(_XBOX_ONE) && defined(_TITLE)) || defined(_GAMING_XBOX)
     static GraphicsMemory::Impl* s_graphicsMemory;
+#else
+    static std::map<ID3D12Device*, GraphicsMemory::Impl*> s_graphicsMemory;
+#endif
+
+private:
+    std::unique_ptr<DeviceAllocator> mDeviceAllocator;
+
+    size_t  m_peakCommited;
+    size_t  m_peakBytes;
+    size_t  m_peakPages;
 };
 
+#if (defined(_XBOX_ONE) && defined(_TITLE)) || defined(_GAMING_XBOX)
 GraphicsMemory::Impl* GraphicsMemory::Impl::s_graphicsMemory = nullptr;
-
+#else
+std::map<ID3D12Device*, GraphicsMemory::Impl*> GraphicsMemory::Impl::s_graphicsMemory;
 #endif
 
 
 //--------------------------------------------------------------------------------------
-
-#ifdef _MSC_VER
-#pragma warning( disable : 4355 )
-#endif
+// GraphicsMemory
+//--------------------------------------------------------------------------------------
 
 // Public constructor.
-#if defined(_XBOX_ONE) && defined(_TITLE)
-GraphicsMemory::GraphicsMemory(_In_ ID3D11DeviceX* device, unsigned int backBufferCount)
-#else
-GraphicsMemory::GraphicsMemory(_In_ ID3D11Device* device, unsigned int backBufferCount)
-#endif
+GraphicsMemory::GraphicsMemory(_In_ ID3D12Device* device)
     : pImpl(std::make_unique<Impl>(this))
 {
-    pImpl->Initialize(device, backBufferCount);
+    pImpl->Initialize(device);
 }
 
 
@@ -312,22 +385,251 @@ GraphicsMemory& GraphicsMemory::operator= (GraphicsMemory&& moveFrom) noexcept
 GraphicsMemory::~GraphicsMemory() = default;
 
 
-void* GraphicsMemory::Allocate(_In_opt_ ID3D11DeviceContext* context, size_t size, int alignment)
+GraphicsResource GraphicsMemory::AllocateImpl(size_t size, size_t alignment)
 {
-    return pImpl->Allocate(context, size, alignment);
+    assert(alignment >= 4); // Should use at least DWORD alignment
+    return pImpl->Allocate(size, alignment);
 }
 
 
-void GraphicsMemory::Commit()
+void GraphicsMemory::Commit(_In_ ID3D12CommandQueue* commandQueue)
 {
-    pImpl->Commit();
+    pImpl->Commit(commandQueue);
 }
 
 
-GraphicsMemory& GraphicsMemory::Get()
+void GraphicsMemory::GarbageCollect()
+{
+    pImpl->GarbageCollect();
+}
+
+GraphicsMemoryStatistics GraphicsMemory::GetStatistics()
+{
+    GraphicsMemoryStatistics stats;
+    pImpl->GetStatistics(stats);
+    return stats;
+}
+
+void GraphicsMemory::ResetStatistics()
+{
+    pImpl->ResetStatistics();
+}
+
+#if (defined(_XBOX_ONE) && defined(_TITLE)) || defined(_GAMING_XBOX)
+GraphicsMemory& GraphicsMemory::Get(_In_opt_ ID3D12Device*)
 {
     if (!Impl::s_graphicsMemory || !Impl::s_graphicsMemory->mOwner)
         throw std::logic_error("GraphicsMemory singleton not created");
 
     return *Impl::s_graphicsMemory->mOwner;
+}
+#else
+GraphicsMemory& GraphicsMemory::Get(_In_opt_ ID3D12Device* device)
+{
+    if (Impl::s_graphicsMemory.empty())
+        throw std::logic_error("GraphicsMemory singleton not created");
+
+    std::map<ID3D12Device*, GraphicsMemory::Impl*>::const_iterator it;
+    if (!device)
+    {
+        // Should only use nullptr for device for single GPU usage
+        assert(Impl::s_graphicsMemory.size() == 1);
+
+        it = Impl::s_graphicsMemory.cbegin();
+    }
+    else
+    {
+        it = Impl::s_graphicsMemory.find(device);
+    }
+
+    if (it == Impl::s_graphicsMemory.cend() || !it->second->mOwner)
+        throw std::logic_error("GraphicsMemory per-device singleton not created");
+
+    return *it->second->mOwner;
+}
+#endif
+
+#ifdef USING_PIX_CUSTOM_MEMORY_EVENTS
+__declspec(allocator)
+void* GraphicsMemory::ReportCustomMemoryAlloc(void* pMem, size_t size, UINT64 metadata)
+{
+    PIXRecordMemoryAllocationEvent(c_PIXAllocatorID, pMem, size, metadata);
+    return pMem;
+}
+#endif
+
+
+//--------------------------------------------------------------------------------------
+// GraphicsResource smart-pointer interface
+//--------------------------------------------------------------------------------------
+
+GraphicsResource::GraphicsResource() noexcept
+    : mPage(nullptr)
+    , mGpuAddress{}
+    , mResource(nullptr)
+    , mMemory(nullptr)
+    , mBufferOffset(0)
+    , mSize(0)
+{
+}
+
+GraphicsResource::GraphicsResource(
+    _In_ LinearAllocatorPage* page,
+    _In_ D3D12_GPU_VIRTUAL_ADDRESS gpuAddress,
+    _In_ ID3D12Resource* resource,
+    _In_ void* memory,
+    _In_ size_t offset,
+    _In_ size_t size) noexcept
+    : mPage(page)
+    , mGpuAddress(gpuAddress)
+    , mResource(resource)
+    , mMemory(memory)
+    , mBufferOffset(offset)
+    , mSize(size)
+{
+    assert(mPage != nullptr);
+    mPage->AddRef();
+}
+
+GraphicsResource::GraphicsResource(GraphicsResource&& other) noexcept
+    : mPage(nullptr)
+    , mGpuAddress{}
+    , mResource(nullptr)
+    , mMemory(nullptr)
+    , mBufferOffset(0)
+    , mSize(0)
+{
+    Reset(std::move(other));
+}
+
+GraphicsResource::~GraphicsResource()
+{
+    if (mPage)
+    {
+#ifdef USING_PIX_CUSTOM_MEMORY_EVENTS
+        PIXRecordMemoryFreeEvent(c_PIXAllocatorID, reinterpret_cast<void*>(mGpuAddress), mSize, 0);
+#endif
+
+        mPage->Release();
+        mPage = nullptr;
+    }
+}
+
+GraphicsResource&& GraphicsResource::operator= (GraphicsResource&& other) noexcept
+{
+    Reset(std::move(other));
+    return std::move(*this);
+}
+
+void GraphicsResource::Reset() noexcept
+{
+    if (mPage)
+    {
+#ifdef USING_PIX_CUSTOM_MEMORY_EVENTS
+        PIXRecordMemoryFreeEvent(c_PIXAllocatorID, reinterpret_cast<void*>(mGpuAddress), mSize, 0);
+#endif
+
+        mPage->Release();
+        mPage = nullptr;
+    }
+
+    mGpuAddress = {};
+    mResource = nullptr;
+    mMemory = nullptr;
+    mBufferOffset = 0;
+    mSize = 0;
+}
+
+void GraphicsResource::Reset(GraphicsResource&& alloc) noexcept
+{
+    if (mPage)
+    {
+#ifdef USING_PIX_CUSTOM_MEMORY_EVENTS
+        PIXRecordMemoryFreeEvent(c_PIXAllocatorID, reinterpret_cast<void*>(mGpuAddress), mSize, 0);
+#endif
+
+        mPage->Release();
+        mPage = nullptr;
+    }
+
+    mGpuAddress = alloc.GpuAddress();
+    mResource = alloc.Resource();
+    mMemory = alloc.Memory();
+    mBufferOffset = alloc.ResourceOffset();
+    mSize = alloc.Size();
+    mPage = alloc.mPage;
+
+    alloc.mGpuAddress = {};
+    alloc.mResource = nullptr;
+    alloc.mMemory = nullptr;
+    alloc.mBufferOffset = 0;
+    alloc.mSize = 0;
+    alloc.mPage = nullptr;
+}
+
+
+//--------------------------------------------------------------------------------------
+// SharedGraphicsResource
+//--------------------------------------------------------------------------------------
+
+SharedGraphicsResource::SharedGraphicsResource() noexcept
+    : mSharedResource(nullptr)
+{
+}
+
+SharedGraphicsResource::SharedGraphicsResource(GraphicsResource&& resource) noexcept(false)
+    : mSharedResource(std::make_shared<GraphicsResource>(std::move(resource)))
+{
+}
+
+SharedGraphicsResource::SharedGraphicsResource(SharedGraphicsResource&& resource) noexcept
+    : mSharedResource(std::move(resource.mSharedResource))
+{
+}
+
+SharedGraphicsResource::SharedGraphicsResource(const SharedGraphicsResource& resource) noexcept
+    : mSharedResource(resource.mSharedResource)
+{
+}
+
+SharedGraphicsResource::~SharedGraphicsResource()
+{
+}
+
+SharedGraphicsResource&& SharedGraphicsResource::operator= (SharedGraphicsResource&& resource) noexcept
+{
+    mSharedResource = std::move(resource.mSharedResource);
+    return std::move(*this);
+}
+
+SharedGraphicsResource&& SharedGraphicsResource::operator= (GraphicsResource&& resource)
+{
+    mSharedResource = std::make_shared<GraphicsResource>(std::move(resource));
+    return std::move(*this);
+}
+
+SharedGraphicsResource& SharedGraphicsResource::operator= (const SharedGraphicsResource& resource) noexcept
+{
+    mSharedResource = resource.mSharedResource;
+    return *this;
+}
+
+void SharedGraphicsResource::Reset() noexcept
+{
+    mSharedResource.reset();
+}
+
+void SharedGraphicsResource::Reset(GraphicsResource&& resource)
+{
+    mSharedResource = std::make_shared<GraphicsResource>(std::move(resource));
+}
+
+void SharedGraphicsResource::Reset(SharedGraphicsResource&& resource) noexcept
+{
+    mSharedResource = std::move(resource.mSharedResource);
+}
+
+void SharedGraphicsResource::Reset(const SharedGraphicsResource& resource) noexcept
+{
+    mSharedResource = resource.mSharedResource;
 }

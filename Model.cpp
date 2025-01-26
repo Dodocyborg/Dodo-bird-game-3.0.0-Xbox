@@ -4,15 +4,18 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 //
-// http://go.microsoft.com/fwlink/?LinkId=248929
+// http://go.microsoft.com/fwlink/?LinkID=615561
 //--------------------------------------------------------------------------------------
 
 #include "pch.h"
 #include "Model.h"
+
 #include "CommonStates.h"
+#include "DescriptorHeap.h"
 #include "DirectXHelpers.h"
 #include "Effects.h"
 #include "PlatformHelpers.h"
+#include "ResourceUploadBatch.h"
 
 using namespace DirectX;
 
@@ -20,18 +23,23 @@ using namespace DirectX;
 #error Model requires RTTI
 #endif
 
+
 //--------------------------------------------------------------------------------------
 // ModelMeshPart
 //--------------------------------------------------------------------------------------
 
-ModelMeshPart::ModelMeshPart() noexcept :
+ModelMeshPart::ModelMeshPart(uint32_t ipartIndex) noexcept :
+    partIndex(ipartIndex),
+    materialIndex(0),
     indexCount(0),
     startIndex(0),
     vertexOffset(0),
     vertexStride(0),
+    vertexCount(0),
+    indexBufferSize(0),
+    vertexBufferSize(0),
     primitiveType(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST),
-    indexFormat(DXGI_FORMAT_R16_UINT),
-    isAlpha(false)
+    indexFormat(DXGI_FORMAT_R16_UINT)
 {
 }
 
@@ -41,121 +49,127 @@ ModelMeshPart::~ModelMeshPart()
 }
 
 
-// Draws using a custom override effect.
 _Use_decl_annotations_
-void ModelMeshPart::Draw(
-    ID3D11DeviceContext* deviceContext,
-    IEffect* ieffect,
-    ID3D11InputLayout* iinputLayout,
-    std::function<void()> setCustomState) const
+void ModelMeshPart::Draw(_In_ ID3D12GraphicsCommandList* commandList) const
 {
-    deviceContext->IASetInputLayout(iinputLayout);
-
-    auto vb = vertexBuffer.Get();
-    const UINT vbStride = vertexStride;
-    constexpr UINT vbOffset = 0;
-    deviceContext->IASetVertexBuffers(0, 1, &vb, &vbStride, &vbOffset);
-
-    // Note that if indexFormat is DXGI_FORMAT_R32_UINT, this model mesh part requires a Feature Level 9.2 or greater device
-    deviceContext->IASetIndexBuffer(indexBuffer.Get(), indexFormat, 0);
-
-    assert(ieffect != nullptr);
-    ieffect->Apply(deviceContext);
-
-    // Hook lets the caller replace our shaders or state settings with whatever else they see fit.
-    if (setCustomState)
+    if (!indexBufferSize || !vertexBufferSize)
     {
-        setCustomState();
+        DebugTrace("ERROR: Model part missing values for vertex and/or index buffer size (indexBufferSize %u, vertexBufferSize %u)!\n", indexBufferSize, vertexBufferSize);
+        throw std::runtime_error("ModelMeshPart");
     }
 
-    // Draw the primitive.
-    deviceContext->IASetPrimitiveTopology(primitiveType);
+    if (!staticIndexBuffer && !indexBuffer)
+    {
+        DebugTrace("ERROR: Model part missing index buffer!\n");
+        throw std::runtime_error("ModelMeshPart");
+    }
 
-    deviceContext->DrawIndexed(indexCount, startIndex, vertexOffset);
+    if (!staticVertexBuffer && !vertexBuffer)
+    {
+        DebugTrace("ERROR: Model part missing vertex buffer!\n");
+        throw std::runtime_error("ModelMeshPart");
+    }
+
+    D3D12_VERTEX_BUFFER_VIEW vbv;
+    vbv.BufferLocation = staticVertexBuffer ? staticVertexBuffer->GetGPUVirtualAddress() : vertexBuffer.GpuAddress();
+    vbv.StrideInBytes = vertexStride;
+    vbv.SizeInBytes = vertexBufferSize;
+    commandList->IASetVertexBuffers(0, 1, &vbv);
+
+    D3D12_INDEX_BUFFER_VIEW ibv;
+    ibv.BufferLocation = staticIndexBuffer ? staticIndexBuffer->GetGPUVirtualAddress() : indexBuffer.GpuAddress();
+    ibv.SizeInBytes = indexBufferSize;
+    ibv.Format = indexFormat;
+    commandList->IASetIndexBuffer(&ibv);
+
+    commandList->IASetPrimitiveTopology(primitiveType);
+
+    commandList->DrawIndexedInstanced(indexCount, 1, startIndex, vertexOffset, 0);
 }
 
 
-// Draws using a custom override effect w/ instancing.
 _Use_decl_annotations_
 void ModelMeshPart::DrawInstanced(
-    ID3D11DeviceContext* deviceContext,
-    IEffect* ieffect,
-    ID3D11InputLayout* iinputLayout,
-    uint32_t instanceCount, uint32_t startInstanceLocation,
-    std::function<void()> setCustomState) const
+    ID3D12GraphicsCommandList* commandList,
+    uint32_t instanceCount,
+    uint32_t startInstance) const
 {
-    deviceContext->IASetInputLayout(iinputLayout);
-
-    auto vb = vertexBuffer.Get();
-    const UINT vbStride = vertexStride;
-    constexpr UINT vbOffset = 0;
-    deviceContext->IASetVertexBuffers(0, 1, &vb, &vbStride, &vbOffset);
-
-    // Note that if indexFormat is DXGI_FORMAT_R32_UINT, this model mesh part requires a Feature Level 9.2 or greater device
-    deviceContext->IASetIndexBuffer(indexBuffer.Get(), indexFormat, 0);
-
-    assert(ieffect != nullptr);
-    ieffect->Apply(deviceContext);
-
-    // Hook lets the caller replace our shaders or state settings with whatever else they see fit.
-    if (setCustomState)
+    if (!indexBufferSize || !vertexBufferSize)
     {
-        setCustomState();
+        DebugTrace("ERROR: Model part missing values for vertex and/or index buffer size (indexBufferSize %u, vertexBufferSize %u)!\n", indexBufferSize, vertexBufferSize);
+        throw std::runtime_error("ModelMeshPart");
     }
 
-    // Draw the primitive.
-    deviceContext->IASetPrimitiveTopology(primitiveType);
+    if (!staticIndexBuffer && !indexBuffer)
+    {
+        DebugTrace("ERROR: Model part missing index buffer!\n");
+        throw std::runtime_error("ModelMeshPart");
+    }
 
-    deviceContext->DrawIndexedInstanced(
-        indexCount, instanceCount, startIndex,
-        vertexOffset,
-        startInstanceLocation);
+    if (!staticVertexBuffer && !vertexBuffer)
+    {
+        DebugTrace("ERROR: Model part missing vertex buffer!\n");
+        throw std::runtime_error("ModelMeshPart");
+    }
+
+    D3D12_VERTEX_BUFFER_VIEW vbv;
+    vbv.BufferLocation = staticVertexBuffer ? staticVertexBuffer->GetGPUVirtualAddress() : vertexBuffer.GpuAddress();
+    vbv.StrideInBytes = vertexStride;
+    vbv.SizeInBytes = vertexBufferSize;
+    commandList->IASetVertexBuffers(0, 1, &vbv);
+
+    D3D12_INDEX_BUFFER_VIEW ibv;
+    ibv.BufferLocation = staticIndexBuffer ? staticIndexBuffer->GetGPUVirtualAddress() : indexBuffer.GpuAddress();
+    ibv.SizeInBytes = indexBufferSize;
+    ibv.Format = indexFormat;
+    commandList->IASetIndexBuffer(&ibv);
+
+    commandList->IASetPrimitiveTopology(primitiveType);
+
+    commandList->DrawIndexedInstanced(indexCount, instanceCount, startIndex, vertexOffset, startInstance);
 }
 
 
-// Creates input layout for use with custom override effects.
 _Use_decl_annotations_
-void ModelMeshPart::CreateInputLayout(ID3D11Device* d3dDevice, IEffect* ieffect, ID3D11InputLayout** iinputLayout) const
+void ModelMeshPart::DrawMeshParts(
+    ID3D12GraphicsCommandList* commandList,
+    const ModelMeshPart::Collection& meshParts)
 {
-    if (iinputLayout)
+    for (const auto& it : meshParts)
     {
-        *iinputLayout = nullptr;
+        auto part = it.get();
+        assert(part != nullptr);
+
+        part->Draw(commandList);
     }
-
-    if (!vbDecl || vbDecl->empty())
-        throw std::runtime_error("Model mesh part missing vertex buffer input elements data");
-
-    if (vbDecl->size() > 32 /* D3D11_IA_VERTEX_INPUT_STRUCTURE_ELEMENT_COUNT */)
-        throw std::runtime_error("Model mesh part input layout size is too large for DirectX 11");
-
-    ThrowIfFailed(
-        CreateInputLayoutFromEffect(d3dDevice, ieffect, vbDecl->data(), vbDecl->size(), iinputLayout)
-    );
-
-    assert(iinputLayout != nullptr && *iinputLayout != nullptr);
-    _Analysis_assume_(iinputLayout != nullptr && *iinputLayout != nullptr);
 }
 
 
-// Assigns a new effect and re-generates input layout.
 _Use_decl_annotations_
-void ModelMeshPart::ModifyEffect(ID3D11Device* d3dDevice, const std::shared_ptr<IEffect>& ieffect, bool isalpha)
+void ModelMeshPart::DrawMeshParts(
+    ID3D12GraphicsCommandList* commandList,
+    const ModelMeshPart::Collection& meshParts,
+    ModelMeshPart::DrawCallback callback)
 {
-    if (!vbDecl || vbDecl->empty())
-        throw std::runtime_error("Model mesh part missing vertex buffer input elements data");
+    for (const auto& it : meshParts)
+    {
+        auto part = it.get();
+        assert(part != nullptr);
 
-    if (vbDecl->size() > 32 /* D3D11_IA_VERTEX_INPUT_STRUCTURE_ELEMENT_COUNT */)
-        throw std::runtime_error("Model mesh part input layout size is too large for DirectX 11");
+        callback(commandList, *part);
+        part->Draw(commandList);
+    }
+}
 
-    assert(ieffect != nullptr);
-    this->effect = ieffect;
-    this->isAlpha = isalpha;
 
-    assert(d3dDevice != nullptr);
-
-    ThrowIfFailed(
-        CreateInputLayoutFromEffect(d3dDevice, effect.get(), vbDecl->data(), vbDecl->size(), inputLayout.ReleaseAndGetAddressOf())
-    );
+_Use_decl_annotations_
+void ModelMeshPart::DrawMeshParts(
+    ID3D12GraphicsCommandList* commandList,
+    const ModelMeshPart::Collection& meshParts,
+    IEffect* effect)
+{
+    effect->Apply(commandList);
+    DrawMeshParts(commandList, meshParts);
 }
 
 
@@ -163,12 +177,8 @@ void ModelMeshPart::ModifyEffect(ID3D11Device* d3dDevice, const std::shared_ptr<
 // ModelMesh
 //--------------------------------------------------------------------------------------
 
-bool ModelMesh::s_reversez = false;
-
 ModelMesh::ModelMesh() noexcept :
-    boneIndex(ModelBone::c_Invalid),
-    ccw(true),
-    pmalpha(true)
+    boneIndex(ModelBone::c_Invalid)
 {
 }
 
@@ -177,230 +187,39 @@ ModelMesh::~ModelMesh()
 {
 }
 
-
-// Set render state for mesh part rendering.
-_Use_decl_annotations_
-void ModelMesh::PrepareForRendering(
-    ID3D11DeviceContext* deviceContext,
-    const CommonStates& states,
-    bool alpha,
-    bool wireframe) const
+// Draw the mesh
+void ModelMesh::DrawOpaque(_In_ ID3D12GraphicsCommandList* commandList) const
 {
-    assert(deviceContext != nullptr);
+    ModelMeshPart::DrawMeshParts(commandList, opaqueMeshParts);
+}
 
-    // Set the blend and depth stencil state.
-    ID3D11BlendState* blendState;
-    ID3D11DepthStencilState* depthStencilState;
-
-    if (alpha)
-    {
-        depthStencilState = (s_reversez) ? states.DepthReadReverseZ() : states.DepthRead();
-        if (pmalpha)
-        {
-            blendState = states.AlphaBlend();
-        }
-        else
-        {
-            blendState = states.NonPremultiplied();
-        }
-    }
-    else
-    {
-        blendState = states.Opaque();
-        depthStencilState = (s_reversez) ? states.DepthReverseZ() : states.DepthDefault();
-    }
-
-    deviceContext->OMSetBlendState(blendState, nullptr, 0xFFFFFFFF);
-    deviceContext->OMSetDepthStencilState(depthStencilState, 0);
-
-    // Set the rasterizer state.
-    if (wireframe)
-        deviceContext->RSSetState(states.Wireframe());
-    else
-        deviceContext->RSSetState(ccw ? states.CullCounterClockwise() : states.CullClockwise());
-
-    // Set sampler state.
-    ID3D11SamplerState* samplers[] =
-    {
-        states.LinearWrap(),
-        states.LinearWrap(),
-    };
-
-    deviceContext->PSSetSamplers(0, 2, samplers);
+void ModelMesh::DrawAlpha(_In_ ID3D12GraphicsCommandList* commandList) const
+{
+    ModelMeshPart::DrawMeshParts(commandList, alphaMeshParts);
 }
 
 
-// Draw mesh given worldViewProjection matrices.
-_Use_decl_annotations_
-void XM_CALLCONV ModelMesh::Draw(
-    ID3D11DeviceContext* deviceContext,
-    FXMMATRIX world,
-    CXMMATRIX view,
-    CXMMATRIX projection,
-    bool alpha,
-    std::function<void()> setCustomState) const
+// Draw the mesh with an effect
+void ModelMesh::DrawOpaque(_In_ ID3D12GraphicsCommandList* commandList, _In_ IEffect* effect) const
 {
-    assert(deviceContext != nullptr);
+    ModelMeshPart::DrawMeshParts(commandList, opaqueMeshParts, effect);
+}
 
-    for (const auto& it : meshParts)
-    {
-        auto part = it.get();
-        assert(part != nullptr);
-
-        if (part->isAlpha != alpha)
-        {
-            // Skip alpha parts when drawing opaque or skip opaque parts if drawing alpha
-            continue;
-        }
-
-        auto imatrices = dynamic_cast<IEffectMatrices*>(part->effect.get());
-        if (imatrices)
-        {
-            imatrices->SetMatrices(world, view, projection);
-        }
-
-        part->Draw(deviceContext, part->effect.get(), part->inputLayout.Get(), setCustomState);
-    }
+void ModelMesh::DrawAlpha(_In_ ID3D12GraphicsCommandList* commandList, _In_ IEffect* effect) const
+{
+    ModelMeshPart::DrawMeshParts(commandList, alphaMeshParts, effect);
 }
 
 
-// Draw the mesh using model bones.
-_Use_decl_annotations_
-void XM_CALLCONV ModelMesh::Draw(
-    ID3D11DeviceContext* deviceContext,
-    size_t nbones, const XMMATRIX* boneTransforms,
-    FXMMATRIX world,
-    CXMMATRIX view,
-    CXMMATRIX projection,
-    bool alpha,
-    std::function<void()> setCustomState) const
+// Draw the mesh with a callback for each mesh part
+void ModelMesh::DrawOpaque(_In_ ID3D12GraphicsCommandList* commandList, ModelMeshPart::DrawCallback callback) const
 {
-    assert(deviceContext != nullptr);
-
-    if (!nbones || !boneTransforms)
-    {
-        throw std::invalid_argument("Bone transforms array required");
-    }
-
-    XMMATRIX local;
-    if (boneIndex != ModelBone::c_Invalid && boneIndex < nbones)
-    {
-        local = XMMatrixMultiply(boneTransforms[boneIndex], world);
-    }
-    else
-    {
-        local = world;
-    }
-
-    for (const auto& it : meshParts)
-    {
-        auto part = it.get();
-        assert(part != nullptr);
-
-        if (part->isAlpha != alpha)
-        {
-            // Skip alpha parts when drawing opaque or skip opaque parts if drawing alpha
-            continue;
-        }
-
-        auto imatrices = dynamic_cast<IEffectMatrices*>(part->effect.get());
-        if (imatrices)
-        {
-            imatrices->SetMatrices(local, view, projection);
-        }
-
-        part->Draw(deviceContext, part->effect.get(), part->inputLayout.Get(), setCustomState);
-    }
+    ModelMeshPart::DrawMeshParts(commandList, opaqueMeshParts, callback);
 }
 
-
-// Draw mesh using skinning given bone transform array.
-_Use_decl_annotations_
-void XM_CALLCONV ModelMesh::DrawSkinned(
-    ID3D11DeviceContext* deviceContext,
-    size_t nbones,
-    const XMMATRIX* boneTransforms,
-    FXMMATRIX world,
-    CXMMATRIX view,
-    CXMMATRIX projection,
-    bool alpha,
-    std::function<void()> setCustomState) const
+void ModelMesh::DrawAlpha(_In_ ID3D12GraphicsCommandList* commandList, ModelMeshPart::DrawCallback callback) const
 {
-    assert(deviceContext != nullptr);
-
-    if (!nbones || !boneTransforms)
-    {
-        throw std::invalid_argument("Bone transforms array required");
-    }
-
-    ModelBone::TransformArray temp;
-
-    for (const auto& mit : meshParts)
-    {
-        auto part = mit.get();
-        assert(part != nullptr);
-
-        if (part->isAlpha != alpha)
-        {
-            // Skip alpha parts when drawing opaque or skip opaque parts if drawing alpha
-            continue;
-        }
-
-        auto imatrices = dynamic_cast<IEffectMatrices*>(part->effect.get());
-        if (imatrices)
-        {
-            imatrices->SetMatrices(world, view, projection);
-        }
-
-        auto iskinning = dynamic_cast<IEffectSkinning*>(part->effect.get());
-        if (iskinning)
-        {
-            if (boneInfluences.empty())
-            {
-                // Direct-mapping of vertex bone indices to our master bone array
-                iskinning->SetBoneTransforms(boneTransforms, nbones);
-            }
-            else
-            {
-                if (!temp)
-                {
-                    // Create the influence mapped bones on-demand.
-                    temp = ModelBone::MakeArray(IEffectSkinning::MaxBones);
-
-                    size_t count = 0;
-                    for (auto it : boneInfluences)
-                    {
-                        ++count;
-                        if (count > IEffectSkinning::MaxBones)
-                        {
-                            throw std::runtime_error("Too many bones for skinning");
-                        }
-
-                        if (it >= nbones)
-                        {
-                            throw std::runtime_error("Invalid bone influence index");
-                        }
-
-                        temp[count - 1] = boneTransforms[it];
-                    }
-
-                    assert(count == boneInfluences.size());
-                }
-
-                iskinning->SetBoneTransforms(temp.get(), boneInfluences.size());
-            }
-        }
-        else if (imatrices)
-        {
-            // Fallback for if we encounter a non-skinning effect in the model
-            const XMMATRIX bm = (boneIndex != ModelBone::c_Invalid && boneIndex < nbones)
-                ? boneTransforms[boneIndex] : XMMatrixIdentity();
-
-            imatrices->SetWorld(XMMatrixMultiply(bm, world));
-        }
-
-        part->Draw(deviceContext, part->effect.get(), part->inputLayout.Get(), setCustomState);
-    }
+    ModelMeshPart::DrawMeshParts(commandList, alphaMeshParts, callback);
 }
 
 
@@ -408,15 +227,20 @@ void XM_CALLCONV ModelMesh::DrawSkinned(
 // Model
 //--------------------------------------------------------------------------------------
 
+Model::Model() noexcept
+{
+}
+
 Model::~Model()
 {
 }
 
 Model::Model(Model const& other) :
     meshes(other.meshes),
+    materials(other.materials),
+    textureNames(other.textureNames),
     bones(other.bones),
-    name(other.name),
-    mEffectCache(other.mEffectCache)
+    name(other.name)
 {
     const size_t nbones = other.bones.size();
     if (nbones > 0)
@@ -440,128 +264,306 @@ Model& Model::operator= (Model const& rhs)
     {
         Model tmp(rhs);
         std::swap(meshes, tmp.meshes);
+        std::swap(materials, tmp.materials);
+        std::swap(textureNames, tmp.textureNames);
         std::swap(bones, tmp.bones);
         std::swap(boneMatrices, tmp.boneMatrices);
         std::swap(invBindPoseMatrices, tmp.invBindPoseMatrices);
         std::swap(name, tmp.name);
-        std::swap(mEffectCache, tmp.mEffectCache);
     }
     return *this;
 }
 
 
-// Draw all meshes in model given worldViewProjection matrices.
-_Use_decl_annotations_
-void XM_CALLCONV Model::Draw(
-    ID3D11DeviceContext* deviceContext,
-    const CommonStates& states,
-    FXMMATRIX world,
-    CXMMATRIX view,
-    CXMMATRIX projection,
-    bool wireframe,
-    std::function<void()> setCustomState) const
+// Load texture resources.
+int Model::LoadTextures(IEffectTextureFactory& texFactory, int destinationDescriptorOffset) const
 {
-    assert(deviceContext != nullptr);
-
-    // Draw opaque parts
-    for (const auto& it : meshes)
+    for (size_t i = 0; i < textureNames.size(); ++i)
     {
-        const auto *mesh = it.get();
-        assert(mesh != nullptr);
-
-        mesh->PrepareForRendering(deviceContext, states, false, wireframe);
-
-        mesh->Draw(deviceContext, world, view, projection, false, setCustomState);
+        texFactory.CreateTexture(textureNames[i].c_str(), destinationDescriptorOffset + static_cast<int>(i));
     }
 
-    // Draw alpha parts
-    for (const auto& it : meshes)
+    return static_cast<int>(textureNames.size());
+}
+
+
+// Load texture resources (helper function).
+_Use_decl_annotations_
+std::unique_ptr<EffectTextureFactory> Model::LoadTextures(
+    ID3D12Device* device,
+    ResourceUploadBatch& resourceUploadBatch,
+    const wchar_t* texturesPath,
+    D3D12_DESCRIPTOR_HEAP_FLAGS flags) const
+{
+    if (textureNames.empty())
+        return nullptr;
+
+    std::unique_ptr<EffectTextureFactory> texFactory = std::make_unique<EffectTextureFactory>(
+        device,
+        resourceUploadBatch,
+        textureNames.size(),
+        flags);
+    if (texturesPath != nullptr && *texturesPath != 0)
     {
-        const auto *mesh = it.get();
-        assert(mesh != nullptr);
+        texFactory->SetDirectory(texturesPath);
+    }
 
-        mesh->PrepareForRendering(deviceContext, states, true, wireframe);
+    LoadTextures(*texFactory);
 
-        mesh->Draw(deviceContext, world, view, projection, true, setCustomState);
+    return texFactory;
+}
+
+
+// Load VB/IB resources for static geometry.
+_Use_decl_annotations_
+void Model::LoadStaticBuffers(
+    ID3D12Device* device,
+    ResourceUploadBatch& resourceUploadBatch,
+    bool keepMemory)
+{
+    // Gather all unique parts
+    std::set<ModelMeshPart*> uniqueParts;
+    for (const auto& mesh : meshes)
+    {
+        for (const auto& part : mesh->opaqueMeshParts)
+        {
+            uniqueParts.insert(part.get());
+        }
+        for (const auto& part : mesh->alphaMeshParts)
+        {
+            uniqueParts.insert(part.get());
+        }
+    }
+
+    const CD3DX12_HEAP_PROPERTIES heapProperties(D3D12_HEAP_TYPE_DEFAULT);
+
+    for (auto it = uniqueParts.cbegin(); it != uniqueParts.cend(); ++it)
+    {
+        auto part = *it;
+
+        // Convert dynamic VB to static VB
+        if (!part->staticVertexBuffer)
+        {
+            if (!part->vertexBuffer)
+            {
+                DebugTrace("ERROR: Model part missing vertex buffer!\n");
+                throw std::runtime_error("ModelMeshPart");
+            }
+
+            part->vertexBufferSize = static_cast<uint32_t>(part->vertexBuffer.Size());
+
+            auto const desc = CD3DX12_RESOURCE_DESC::Buffer(part->vertexBuffer.Size());
+
+            ThrowIfFailed(device->CreateCommittedResource(
+                &heapProperties,
+                D3D12_HEAP_FLAG_NONE,
+                &desc,
+                c_initialCopyTargetState,
+                nullptr,
+                IID_GRAPHICS_PPV_ARGS(part->staticVertexBuffer.GetAddressOf())
+            ));
+
+            SetDebugObjectName(part->staticVertexBuffer.Get(), L"ModelMeshPart");
+
+            resourceUploadBatch.Upload(part->staticVertexBuffer.Get(), part->vertexBuffer);
+
+            resourceUploadBatch.Transition(part->staticVertexBuffer.Get(),
+                D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
+
+            // Scan for any other part with the same vertex buffer for sharing
+            for (auto sit = std::next(it); sit != uniqueParts.cend(); ++sit)
+            {
+                auto sharePart = *sit;
+                assert(sharePart != part);
+
+                if (sharePart->staticVertexBuffer)
+                    continue;
+
+                if (sharePart->vertexBuffer == part->vertexBuffer)
+                {
+                    sharePart->vertexBufferSize = part->vertexBufferSize;
+                    sharePart->staticVertexBuffer = part->staticVertexBuffer;
+
+                    if (!keepMemory)
+                    {
+                        sharePart->vertexBuffer.Reset();
+                    }
+                }
+            }
+
+            if (!keepMemory)
+            {
+                part->vertexBuffer.Reset();
+            }
+        }
+
+        // Convert dynamic IB to static IB
+        if (!part->staticIndexBuffer)
+        {
+            if (!part->indexBuffer)
+            {
+                DebugTrace("ERROR: Model part missing index buffer!\n");
+                throw std::runtime_error("ModelMeshPart");
+            }
+
+            part->indexBufferSize = static_cast<uint32_t>(part->indexBuffer.Size());
+
+            auto const desc = CD3DX12_RESOURCE_DESC::Buffer(part->indexBuffer.Size());
+
+            ThrowIfFailed(device->CreateCommittedResource(
+                &heapProperties,
+                D3D12_HEAP_FLAG_NONE,
+                &desc,
+                c_initialCopyTargetState,
+                nullptr,
+                IID_GRAPHICS_PPV_ARGS(part->staticIndexBuffer.GetAddressOf())
+            ));
+
+            SetDebugObjectName(part->staticIndexBuffer.Get(), L"ModelMeshPart");
+
+            resourceUploadBatch.Upload(part->staticIndexBuffer.Get(), part->indexBuffer);
+
+            resourceUploadBatch.Transition(part->staticIndexBuffer.Get(),
+                D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_INDEX_BUFFER);
+
+            // Scan for any other part with the same index buffer for sharing
+            for (auto sit = std::next(it); sit != uniqueParts.cend(); ++sit)
+            {
+                auto sharePart = *sit;
+                assert(sharePart != part);
+
+                if (sharePart->staticIndexBuffer)
+                    continue;
+
+                if (sharePart->indexBuffer == part->indexBuffer)
+                {
+                    sharePart->indexBufferSize = part->indexBufferSize;
+                    sharePart->staticIndexBuffer = part->staticIndexBuffer;
+
+                    if (!keepMemory)
+                    {
+                        sharePart->indexBuffer.Reset();
+                    }
+                }
+            }
+
+            if (!keepMemory)
+            {
+                part->indexBuffer.Reset();
+            }
+        }
     }
 }
 
 
-// Draw all meshes in model using rigid-body animation given bone transform array.
-_Use_decl_annotations_
-void XM_CALLCONV Model::Draw(
-    ID3D11DeviceContext* deviceContext,
-    const CommonStates& states,
-    size_t nbones,
-    const XMMATRIX* boneTransforms,
-    FXMMATRIX world,
-    CXMMATRIX view,
-    CXMMATRIX projection,
-    bool wireframe,
-    std::function<void()> setCustomState) const
+// Create effects for each mesh piece.
+Model::EffectCollection Model::CreateEffects(
+    IEffectFactory& fxFactory,
+    const EffectPipelineStateDescription& opaquePipelineState,
+    const EffectPipelineStateDescription& alphaPipelineState,
+    int textureDescriptorOffset,
+    int samplerDescriptorOffset) const
 {
-    assert(deviceContext != nullptr);
-
-    // Draw opaque parts
-    for (const auto& it : meshes)
+    if (materials.empty())
     {
-        const auto *mesh = it.get();
-        assert(mesh != nullptr);
-
-        mesh->PrepareForRendering(deviceContext, states, false, wireframe);
-
-        mesh->Draw(deviceContext, nbones, boneTransforms, world, view, projection, false, setCustomState);
+        DebugTrace("ERROR: Model has no material information to create effects!\n");
+        throw std::runtime_error("CreateEffects");
     }
 
-    // Draw alpha parts
-    for (const auto& it : meshes)
+    EffectCollection effects;
+
+    // Count the number of parts
+    uint32_t partCount = 0;
+    for (const auto& mesh : meshes)
     {
-        const auto *mesh = it.get();
+        for (const auto& part : mesh->opaqueMeshParts)
+            partCount = std::max(part->partIndex + 1, partCount);
+        for (const auto& part : mesh->alphaMeshParts)
+            partCount = std::max(part->partIndex + 1, partCount);
+    }
+
+    if (partCount == 0)
+        return effects;
+
+    // Create an array of effects for each part. We need to have an effect per part because the part's vertex layout
+    // combines with the material spec to create a unique effect. We rely on the EffectFactory to de-duplicate if it
+    // wants to.
+    effects.resize(partCount);
+
+    for (const auto& mesh : meshes)
+    {
         assert(mesh != nullptr);
 
-        mesh->PrepareForRendering(deviceContext, states, true, wireframe);
+        for (const auto& part : mesh->opaqueMeshParts)
+        {
+            assert(part != nullptr);
 
-        mesh->Draw(deviceContext, nbones, boneTransforms, world, view, projection, true, setCustomState);
+            if (part->materialIndex == uint32_t(-1))
+                continue;
+
+            // If this fires, you have multiple parts with the same unique ID
+            assert(effects[part->partIndex] == nullptr);
+
+            effects[part->partIndex] = CreateEffectForMeshPart(fxFactory, opaquePipelineState, alphaPipelineState, textureDescriptorOffset, samplerDescriptorOffset, part.get());
+        }
+
+        for (const auto& part : mesh->alphaMeshParts)
+        {
+            assert(part != nullptr);
+
+            if (part->materialIndex == uint32_t(-1))
+                continue;
+
+            // If this fires, you have multiple parts with the same unique ID
+            assert(effects[part->partIndex] == nullptr);
+
+            effects[part->partIndex] = CreateEffectForMeshPart(fxFactory, opaquePipelineState, alphaPipelineState, textureDescriptorOffset, samplerDescriptorOffset, part.get());
+        }
     }
+
+    return effects;
 }
 
 
-// Draw all meshes in model using skinning given bone transform array.
+// Private helper for creating an effect for a mesh part.
 _Use_decl_annotations_
-void XM_CALLCONV Model::DrawSkinned(
-    ID3D11DeviceContext* deviceContext,
-    const CommonStates& states,
-    size_t nbones,
-    const XMMATRIX* boneTransforms,
-    FXMMATRIX world,
-    CXMMATRIX view,
-    CXMMATRIX projection,
-    bool wireframe,
-    std::function<void()> setCustomState) const
+std::shared_ptr<IEffect> Model::CreateEffectForMeshPart(
+    IEffectFactory& fxFactory,
+    const EffectPipelineStateDescription& opaquePipelineState,
+    const EffectPipelineStateDescription& alphaPipelineState,
+    int textureDescriptorOffset,
+    int samplerDescriptorOffset,
+    const ModelMeshPart* part) const
 {
-    assert(deviceContext != nullptr);
+    assert(part->materialIndex < materials.size());
+    const auto& m = materials[part->materialIndex];
 
-    // Draw opaque parts
-    for (const auto& it : meshes)
-    {
-        const auto *mesh = it.get();
-        assert(mesh != nullptr);
+    if (!part->vbDecl || part->vbDecl->empty())
+        throw std::runtime_error("Model mesh part missing vertex buffer input elements data");
 
-        mesh->PrepareForRendering(deviceContext, states, false, wireframe);
+    if (part->vbDecl->size() > D3D12_IA_VERTEX_INPUT_STRUCTURE_ELEMENT_COUNT)
+        throw std::runtime_error("Model mesh part input layout size is too large for DirectX 12");
 
-        mesh->DrawSkinned(deviceContext, nbones, boneTransforms, world, view, projection, false, setCustomState);
-    }
+    D3D12_INPUT_LAYOUT_DESC il = {};
+    il.NumElements = static_cast<UINT>(part->vbDecl->size());
+    il.pInputElementDescs = part->vbDecl->data();
 
-    // Draw alpha parts
-    for (const auto& it : meshes)
-    {
-        const auto *mesh = it.get();
-        assert(mesh != nullptr);
+    return fxFactory.CreateEffect(m, opaquePipelineState, alphaPipelineState, il, textureDescriptorOffset, samplerDescriptorOffset);
+}
 
-        mesh->PrepareForRendering(deviceContext, states, true, wireframe);
 
-        mesh->DrawSkinned(deviceContext, nbones, boneTransforms, world, view, projection, true, setCustomState);
-    }
+// Create effects for each mesh piece with the default factory.
+_Use_decl_annotations_
+Model::EffectCollection Model::CreateEffects(
+    const EffectPipelineStateDescription& opaquePipelineState,
+    const EffectPipelineStateDescription& alphaPipelineState,
+    ID3D12DescriptorHeap* textureDescriptorHeap,
+    ID3D12DescriptorHeap* samplerDescriptorHeap,
+    int textureDescriptorOffset,
+    int samplerDescriptorOffset) const
+{
+    EffectFactory fxFactory(textureDescriptorHeap, samplerDescriptorHeap);
+    return CreateEffects(fxFactory, opaquePipelineState, alphaPipelineState, textureDescriptorOffset, samplerDescriptorOffset);
 }
 
 
@@ -715,29 +717,134 @@ void Model::CopyBoneTransformsTo(size_t nbones, XMMATRIX* boneTransforms) const
 }
 
 
-// Iterate through unique effect instances.
-void Model::UpdateEffects(_In_ std::function<void(IEffect*)> setEffect)
+// Updates effect matrices (if applicable).
+void XM_CALLCONV Model::UpdateEffectMatrices(
+    EffectCollection& effects,
+    FXMMATRIX world,
+    CXMMATRIX view,
+    CXMMATRIX proj)
 {
-    if (mEffectCache.empty())
+    for (auto& fx : effects)
     {
-        // This cache ensures we only set each effect once (could be shared)
-        for (const auto& mit : meshes)
+        auto imatrices = dynamic_cast<IEffectMatrices*>(fx.get());
+        if (imatrices)
         {
-            auto mesh = mit.get();
-            assert(mesh != nullptr);
+            imatrices->SetMatrices(world, view, proj);
+        }
+    }
+}
 
-            for (const auto& it : mesh->meshParts)
+
+// Transition static VB/IB resources (if applicable).
+void Model::Transition(
+    _In_ ID3D12GraphicsCommandList* commandList,
+    D3D12_RESOURCE_STATES stateBeforeVB,
+    D3D12_RESOURCE_STATES stateAfterVB,
+    D3D12_RESOURCE_STATES stateBeforeIB,
+    D3D12_RESOURCE_STATES stateAfterIB)
+{
+    UINT count = 0;
+    D3D12_RESOURCE_BARRIER barrier[64] = {};
+
+    for (auto& mit : meshes)
+    {
+        for (auto& pit : mit->opaqueMeshParts)
+        {
+            assert(count < std::size(barrier));
+            _Analysis_assume_(count < std::size(barrier));
+
+            if (stateBeforeIB != stateAfterIB && pit->staticIndexBuffer)
             {
-                if (it->effect)
-                    mEffectCache.insert(it->effect.get());
+                barrier[count].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+                barrier[count].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+                barrier[count].Transition.pResource = pit->staticIndexBuffer.Get();
+                barrier[count].Transition.StateBefore = stateBeforeIB;
+                barrier[count].Transition.StateAfter = stateAfterIB;
+                ++count;
+
+                if (count >= std::size(barrier))
+                {
+                    commandList->ResourceBarrier(count, barrier);
+                    count = 0;
+                }
+            }
+
+            if (stateBeforeVB != stateAfterVB && pit->staticVertexBuffer)
+            {
+                barrier[count].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+                barrier[count].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+                barrier[count].Transition.pResource = pit->staticVertexBuffer.Get();
+                barrier[count].Transition.StateBefore = stateBeforeVB;
+                barrier[count].Transition.StateAfter = stateAfterVB;
+                ++count;
+
+                if (count >= std::size(barrier))
+                {
+                    commandList->ResourceBarrier(count, barrier);
+                    count = 0;
+                }
+            }
+        }
+
+        for (auto& pit : mit->alphaMeshParts)
+        {
+            assert(count < std::size(barrier));
+            _Analysis_assume_(count < std::size(barrier));
+
+            if (stateBeforeIB != stateAfterIB && pit->staticIndexBuffer)
+            {
+                barrier[count].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+                barrier[count].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+                barrier[count].Transition.pResource = pit->staticIndexBuffer.Get();
+                barrier[count].Transition.StateBefore = stateBeforeIB;
+                barrier[count].Transition.StateAfter = stateAfterIB;
+                ++count;
+
+                if (count >= std::size(barrier))
+                {
+                    commandList->ResourceBarrier(count, barrier);
+                    count = 0;
+                }
+            }
+
+            if (stateBeforeVB != stateAfterVB && pit->staticVertexBuffer)
+            {
+                barrier[count].Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+                barrier[count].Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+                barrier[count].Transition.pResource = pit->staticVertexBuffer.Get();
+                barrier[count].Transition.StateBefore = stateBeforeVB;
+                barrier[count].Transition.StateAfter = stateAfterVB;
+                ++count;
+
+                if (count >= std::size(barrier))
+                {
+                    commandList->ResourceBarrier(count, barrier);
+                    count = 0;
+                }
             }
         }
     }
 
-    assert(setEffect != nullptr);
-
-    for (const auto it : mEffectCache)
+    if (count > 0)
     {
-        setEffect(it);
+        commandList->ResourceBarrier(count, barrier);
     }
 }
+
+
+//--------------------------------------------------------------------------------------
+// Adapters for /Zc:wchar_t- clients
+
+#if defined(_MSC_VER) && !defined(_NATIVE_WCHAR_T_DEFINED)
+
+_Use_decl_annotations_
+std::unique_ptr<EffectTextureFactory> Model::LoadTextures(
+    ID3D12Device* device,
+    ResourceUploadBatch& resourceUploadBatch,
+    const __wchar_t* texturesPath,
+    D3D12_DESCRIPTOR_HEAP_FLAGS flags) const
+{
+    return LoadTextures(device, resourceUploadBatch, reinterpret_cast<const unsigned short*>(texturesPath), flags);
+}
+
+#endif
