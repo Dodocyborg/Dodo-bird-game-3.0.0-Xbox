@@ -1,659 +1,645 @@
-# DirectXTex texture processing library
+# DirectX Tool Kit for DirectX 11
 
-http://go.microsoft.com/fwlink/?LinkId=248926
+http://go.microsoft.com/fwlink/?LinkId=248929
 
-Release available for download on [GitHub](https://github.com/microsoft/DirectXTex/releases)
+Release available for download on [GitHub](https://github.com/microsoft/DirectXTK/releases)
 
 ## Release History
 
 ### October 28, 2024
 * All enums now use ``uint32_t`` as the underlying type rather than ``unsigned long`` or ``int``.
-* Added ``BytesPerBlock`` utility helper
-* Fixed bug in DirectX 12 `CaptureTexture` for MSAA resolve state handling
-* texassemble, texconv, texdiag:
+* Added `DDS_LOADER_INGNORE_MIPS` flag to DDSTextureLoader
+* Refactored CMO structures into their own header
+* xwbool:
   * Add "GNU-style" *--long-options* to the command-line tools (all existing switches are still supported)
-  * Fixed bug in texdiag's ``dumpdds`` command output filename extension handling
   * Refactored code to use shared header
+* MakeSpriteFont: supports `--version` and `--help` and accepts either `/` or `-` style command-line parameters.
 * CMake and MSBuild project updates
 
 ### September 4, 2024
-* DDS reader now accepts a variant of the "DX10" extended header
-  * arraySize of 0 is treated as 1
-* DDS reader will now load legacy 'mixed' channel formats as UNORM
-  * Uses x2bias for the signed channels
-  * `DDSPF_L6V5U5`, `DDSPF_X8L8V8U8`, `DDSPF_A2W10V10U10`
-* texconv: Added `-ignoremips` option to handle some invalid/truncated DDS files
-* EXR auxiliary reader returns 6 images for files with 'envmap' metadata
-* PNG auxiliary reader/writer fixed for single channel images (`DXGI_FORMAT_R8_UNORM`)
-* Xbox auxiliary now has `EncodeDDSHeader` function
-* ScreenGrab9 minor DDS header fix when writing A2W10V10U10 legacy mixed formats
+* *DirectX Tool Kit for Audio* update
+  * Added ``IsValid`` method to **AudioEmitter** and **AudioListener**
+* Sync'd DDS.H with latest changes from DirectXTex
 * CMake project updates including support for ARM64EC
+* Minor code review
 * Added GitHub Actions YAML files
 
 ### June 4, 2024
-* Fix for HDR codec to avoid buffer overread for some malformed files
-* Updated D3DX12 internal copy with latest changes from DirectX-Headers GitHub
+* Renamed Internal namespace to ToolKitInternal for some conformance issues
 * CMake project updates
 * Retired VS 2019 projects for the UWP platform
 
-### March 6, 2024
-* Xbox Auxiliary tiling/detiling code optimization
-
 ### February 21, 2024
-* TGA reader now limited to 4 GB for maximum image size for security hardening
-* Project updates for improved logging of shader compilation errors and GDK validation
-* CMake project updates and refactor
+* Project updates for GDK validation
+* CMake project updates and refactor including pkg-config file generation
 * Minor code review for Clang, MinGW, and Intel compilers
-* Auxiliary updated with LIBJPEG and LIBPNG implementations for use on WSL which lacks WIC
-* texassemble: new ``from-mips`` command
-* texconv: Updated to support Xbox extension functionality
 
 ### December 31, 2023
-* TGA reader bug fix for offset boundary check
-* PPM/PFM reader bug fixes for bounds checking
-* Xbox-specific functionality added to Auxiliary folder
-* CMake project updates including pkg-config file generation
+* Fix WAVFileReader bugs with bounds checking
+* CMake project updates
 * Code review
 
 ### October 28, 2023
-* New ``DDS_PERMISSIVE_FLAG`` to allow reading of various DDS DX9 file variants
-  * *breaking change* required to accept reading *Unreal Tournament 2004* DDS files
-  * Allows cases where DDS_HEADER size is incorrectly set to 24
-  * Allows cases where DDPIXELFORMAT size is incorrectly set to 24
-  * Allows cases where DDS_HEADER.MipMapCount is set to the wrong value
-* texassemble/texconv/texdiag: ``-flist`` option updated to support filenames with spaces
-* texconv: ``-permissive`` switch added to opt-in use of new flag when reading DDS files
+* Additional methods for *DirectX Tool Kit for Audio* emitter for linear and inverse-square falloff curves
+* xwbtool: -flist option updated to support filenames with spaces
 
 ### September 1, 2023
-* ``CompressEx`` and ``ConvertEx`` functions added with status callback and options structs
-* Added optional ``DDSMetaData`` return for Ex versions of DDS loader functions
-* Added ``TEX_ALPHA_WEIGHT_DEFAULT`` constant (set to 1.0)
-* DDS reader updated to support variant used by *Unreal Tournament 2004*
-* Fixed overvalidation bug with BC7 GPU compressor with SRGB formats
 * Retired ARM (32-bit) support for the UWP platform
 * CMake project updates
 
 ### June 13, 2023
-* Added ``TEX_FILTER_RGB_COPY_ALPHA`` flag and support for ``DXGI_FORMAT_A4B4G4R4_UNORM``
-* DDS loader now supports 'swizzled' DXT5 variant FourCCs
 * CMake project updates
-* texconv: Added ``-f BC3n``,  ``-f DXT5nm``, and ``-f RXBG`` support; ``.ddx`` file extension; and ``-tgazeroalpha`` switch
-* texassemble/texconv/texdiag: Fix minor display issue with error messages
-* texassemble/texconv/texdiag: Supports Long Paths on Windows 10, Version 1607 or later
+* xwbtool: Fix minor display issue with error messages
+* xwbtool: Supports Long Paths on Windows 10, Version 1607 or later
 
 ### April 28, 2023
-* Updated D3DX12 internal copy with latest changes from DirectX-Headers GitHub
+* MapGuard in DirectXHelpers should not support the move ctor or move operator
 * CMake project updates and fixes for clang/LLVM v16 warnings
-* texassemble/texconv/texdiag: Windows on ARM64 version
+* xwbtool: Windows on ARM64 version
 
 ### March 30, 2023
-* Fix for `SRGB_IN` / `SRGB_OUT` flag handling for GPU BC7 compressor
-* Fix to clamp negative values when encoding with the GPU BC6H compressor
-* GPU BC6H/BC7 encoder updated to make optional use of DirectCompute 5.0
+* *DirectX Tool Kit for Audio* updates
+  * Reworked audio device enumeration for XAudio 2.9 to use MMDeviceEnumerator rather than Windows Runtime APIs
+  * ``GetOutputFormat`` now reports sample rate and bit-depth from the audio device properties
+  * New method ``GetOutputSampleRate`` added to return the input sample rate of the mastering voice
+  * ``Resume`` now handles device failure by switching to silent mode
 * CMake project updates
-* Code review
 * Retired VS 2017 legacy Xbox One XDK projects
-* texassemble/texconv/texdiag: Updated to support Windows or UNIX-style path separators
+* xwbtool: Updated to support Windows or UNIX-style path separators
 
-### January 31, 2023
-* Fixed memory overwrite bug in **ConvertToSinglePlane** that can lead to a potential security issue for untrusted planar video format DDS files
-* Make sure ScratchImage zero-fills image memory
-* Fix DirectX12 GPU-validation warnings for texture loaders
-* Minor fix for non-Win32 builds
-* ddsview: Updated sample app with a ``-forcesrgb`` command-line switch
+### February 6, 2023
+* Mouse relative mode now accumulates multiple delta updates per frame. Added new optional but recommended method ``EndOfInputFrame``.
+* Fixed out-of-bounds read bug in the .WAV file reader.
+* Additional checks added to DDSTextureLoader for planar video formats.
+* *DirectX Tool Kit for Audio* updated for XAudio2Redist 1.2.11
+* CMake project updates
 
 ### December 15, 2022
-* ARM/ARM64 platform fix for 16bpp pixel conversion
-* Updated D3DX12 internal copy with latest changes from DirectX-Headers GitHub
+* GamePad, Keyboard, and Mouse headers have ``USING_XINPUT``, ``USING_GAMEINPUT``, ``USING_WINDOWS_GAMING_INPUT`` defines
+* Updates for *GameInputCreate* failure handling on PC
+* *DirectX Tool Kit for Audio* updated for XAudio2Redist 1.2.10
 * CMake project updated to require 3.20 or later
 * CMake and MSBuild project updates
+* Minor MinGW code changes
 * Added Azure Dev Ops Pipeline YAML files
-* ``Auxiliary`` folder added with DirectXEXR.h/.cpp optional module
 * Test suite updated with CTest support
-* Spectre-mitigated libraries added to NuGet packages
-* texassemble: added commands *v-cross-fnz*, *h-tee*, and *cube-from-\**
-* texconv: Fixed minor printf output issue
 
 ### October 17, 2022
+* Additional methods for *DirectX Tool Kit for Audio* emitter and listener for cone and falloff curves
+* Added use of C++11 inline namespaces to make it possible to link both DX11 and DX12 versions at once
 * Minor fix for ``CompileShaders.cmd`` to address additional 'paths with spaces' issues
-* Minor CMake and CMakePresets updates
-* Code review
+* Minor CMake update
 
 ### July 29, 2022
-* Added ``MakeLinear`` DXGI_FORMAT utility function.
-* *breaking change* ``CreateTextureEx`` and ``CreateShaderResourceViewEx`` functions now use ``CREATETEX_FLAGS`` instead of a ``bool forceSRGB`` parameter.
-* Updates for MinGW ABI fixes for DirectX12 in the latest DirectX-Headers.
+* *breaking change* DDSTextureLoader ``Ex`` functions now use ``DDS_LOADER_FLAGS`` instead of ``bool forceSRGB`` parameter.
+* MapGuard helper class updated with a new ``copy`` method
+* Fixed Mouse race-condition with changing mode and resetting scroll wheel at the same time.
 * CMake and MSBuild project updates
-* Code review
-* `DDSTextureLoader11` and ``DDSTextureLoader12`` sync'd up with *DirectX Tool Kit* July 2022 changes.
+* Minor code review
+
+### June 15, 2022
+* GamePad, Keyboard, and Mouse updated to use GameInput on PC for the Gaming.Desktop.x64 platform
+* *DirectX Tool Kit for Audio* updated for XAudio2Redist 1.2.9
+* CMake project updates
 
 ### May 9, 2022
-* TGA reader updated to support 24-bit paletted uncompressed color-mapped images (used by a DCC application)
-* Added `IsBGR` utility method
-* Workaround for driver issue on some systems using DirectX 11 `Capture` method
-* Fix for problem with resizing/mipmaps generation for HDR content using box/fant filter which should avoid going through WIC code paths
+* C++20 spaceship operator updates for SimpleMath
 * Minor updates for VS 2022 (17.2)
 * CMake project updates (now supports MSVC, clang/LLVM, and MinGW)
-* Updated D3DX12 internal copy with latest changes from DirectX-Headers GitHub
+* Added Microsoft GDK projects using the Gaming.Desktop.x64 platform
 * Retired VS 2017 projects
-* Code cleanup
+* Minor code review
 * Reformat source using updated .editorconfig settings
-* texconv: Improve `-nmap` handling for 16-bit sources going to BC formats
 
 ### March 24, 2022
-* Fixed end-point bounds issue with BC6H CPU compressor if none of the pixels are in 0-1 range
-* Fixed bug in alpha-to-coverage computation
-* Add support for installable WIC codecs for HEIF and WEBP (if present)
+* Fixed bug in UWP implementation of Mouse that combined vertical/horizontal scroll-wheel input
+* Code refactoring for input classes (GamePad, Keyboard, and Mouse)
 * Update build switches for SDL recommendations
 * CMake project updates and UWP platform CMakePresets
-* Code cleaup for tools
-* Optional C++17 usage in a few places
+* Dropped support for legacy Xbox One XDK prior to April 2018
 
 ### February 28, 2022
-* Updated D3DX12 internal copy with latest changes from GitHub
+* SimpleMath Matrix updated with ToEuler and Vector3 version of CreateFromYawPitchRoll methods
+* SimpleMath Quaternion updated with ToEuler, RotateTowards, FromToRotation, LookRotation, and Angle methods
+* Keyboard updated with new IME On/Off v-keys
+* Win32 Mouse now uses ``WM_ACTIVATE`` for more robust behavior
+* *DirectX Tool Kit for Audio* updated for Advanced Format (4Kn) wavebank streaming
 * Code and project review including fixing clang v13 warnings
 * Added CMakePresets.json
+* xwbtool: Added support for Advanced Format (4Kn) streaming wavebanks with ``-af``
 
 ### November 8, 2021
 * VS 2022 support
-* Updated D3DX12 internal copy with latest change from GitHubf
 * Minor code and project review
-* VS 2017 projects updated to require the Windows 10 SDK (19401)
-* texassemble/texconv: Updated with 12.2 for ``-fl`` switch
-* texassemble/texconv/texdiag: Fixed potential locale issue with ``-flist``
+* makespritefont: Updated with 12.2 for FeatureLevel switch
+* xwbtool: Fixed potential locale issue with ``-flist``
 
-### September 28, 2021
-* Minor code and project cleanup
+### October 18, 2021
+* Fixed loading of skinned PBR models from SDKMESH v2
+* *DirectX Tool Kit for Audio* updated for XAudio2Redist 1.2.8
+* Minor code review updates
+
+### October 13, 2021
+* Added skinning support for **NormalMapEffect** and **PBREffect**
+* Common states updated with support for reverse z-buffer rendering with **DepthReverseZ** and **DepthReadReverseZ** methods.
+* Effect factory updates
+  * Updated to use ``SkinnedNormalMapEffect`` / ``SkinnedPBREffect`` as appropriate.
+  * Automatically disables use of normal mapping on 9.x feature levels
+  * PBR now supports 'untextured' models (always requires texture coordinates) with use of diffuse color for constant albedo, and specular power for an estimated constant roughness.
+* Model loader updates
+  * SDKMESH loader no longer requires precomputed vertex tangents for normal mapping as we don't use them.
+  * Added ``ModelLoader_DisableSkinning`` flag when dealing with legacy SDKMESH files with too many skinning bone influences for _MaxBone_
+* Minor update for the Mouse implementation for GameInput
+* Project and code cleanup
+
+### September 30, 2021
+* Added ModelBone support for transformation hierarchies
+  * Rigid-body & skinned animation Draw support added to Model
+* Added type aliases ``ModelMeshPart::InputLayoutCollection``, ``GeometricPrimitive::VertexCollection`` and ``IndexCollection``.
+* EnvironmentMapEffect and NormalMapEffect will now use default diffuse/normal textures if none are set
+* VS 2017 projects updated to require the Windows 10 SDK (19401)
+* Code review updates
 
 ### August 1, 2021
-* Fixed weighting bug in custom linear filtering for wrap/mirroring
+* DebugEffect, NormalMapEffect, and PBREffect updated with instancing support
+* GeometricPrimitive updated with DrawInstanced method
+* ToneMapPostProcess updated with SetColorRotation method
 * Added VS 2022 Preview projects
-* texconv: Made default output extension to be lower-case like most Windows applications
-* texconv: updated colorspace rotation names for -rotatecolor switch
-* texassemble, texconv: Order of operations fix for -swizzle using 0, 1
+* MakeSpriteFont updated to use .NET 4.7.2
 * Minor code review
 
 ### June 9, 2021
-* Minor bug fix for metadata behavior when using ``DDS_FLAGS_NO_16BPP`` flag for B5G6R5 content
-* texdiag: added ``-c`` and ``-t`` switches for diff command
-* texconv: Fixed bug in ``-m`` switch handling when resizing changes the max mipmap count
-* texconv et al: improved ``-flist`` switch to support wildcards and file exclusions
-* texconv et al: Added 'BGR' alias to ``-f`` switch for the B8G8R8X8_UNORM format
-* WICTextureLoader / DDSTextureLoader12 updated to use typed enum bitmask flags for loadFlags parameter
+* DirectX Tool Kit for Audio updates:
+  * Fixed mono source panning
+  * Added ``EnableDefaultMultiChannel`` helper to AudioEmitter for multi-channel source setup
+  * Added ``GetChannelCount`` accessor to SoundEffectInstance and SoundStreamInstance
+  * ``Apply3D`` can now use X3DAUDIO_LISTENER and X3DAUDIO_EMITTER directly or the library helper structs.
+* xwbtool: improved ``-flist`` switch to support wildcards and file exclusions
+* CMake updated to support building with XAudio2Redist
 * Minor code review
 
 ### April 6, 2021
-* DDS reader updated to accept nVidia Texture Tool v1 single-channel and dual-channel files marked as RGB instead of LUMINANCE
-* Fixed TGA reader regression with files smaller than 26 bytes total
-* Removed use of ``CreateStreamOnHGlobal``, ``CreateStreamOverRandomAccessStream``, and ``SHCreateMemStream`` for WICToMemory functions
-* Fix for the DirectX 12 ``CaptureTexture`` for reserved and MSAA resources
+* DDSTextureLoader reader updated to accept nVidia Texture Tool v1 single-channel and dual-channel files marked as RGB instead of LUMINANCE
 * Minor code and project cleanup
-* texassemble: added ``-stripmips`` switch
-* texassemble, texconv: the ``swizzle`` switch now accepts ``0`` and ``1`` values in swizzle masks
-* texconv: added "709toDisplayP3" and "DisplayP3to709" to ``-rotatecolor`` switch
-* texconv: Fixed ``-reconstructz`` for UNORM formats
-* texassemble, texconv, texdiag: Updated with  descriptions for HRESULT failure codes, and always uses exit code 1 on failure
+* xwbtool: Updated with  descriptions for HRESULT failure codes
 
 ### January 9, 2021
-* Windows Subsystem for Linux support
 * Code review for improved conformance
 * CMake updated to support package install
-* texassemble: Merge command now supports ``-swizzle`` option
-* texconv: Updated with ``-r:keep`` and ``-swizzle`` options
 
 ### November 11, 2020
-* Use ``SHCreateMemStream`` instead of ``CreateStreamOnHGlobal`` for Win32 on Windows 8.x or Windows 10
-* Updated D3DX12 internal copy with latest change from GitHub
+* Fixed ``/analyze`` warnings in GameInput usage
+* Fixed *DirectX Tool Kit for Audio* use of XAudio 2.8 for Windows 8 w/ Windows 10 SDK
 * Minor code and project cleanup
+* *DirectX Tool Kit for Audio* updated for XAudio2Redist 1.2.4
 
 ### September 30, 2020
-* Added ``TGA_FLAGS`` [flags](https://github.com/microsoft/DirectXTex/wiki/TGA-I-O-Functions#related-flags) to TGA reader/writer to control RGB vs. BGR, handling for all zero alpha channels, and TGA 2.0 colorspace metadata
-  * TGA reader will now return a ``DXGI_FORMAT_*_SRGB`` format if TGA 2.0 colorspace metadata contains 2.2 or 2.4 gamma
-  * Added forwarders for existing non-flags TGA functions, so there are no breaking changes
-* ``R16_SNORM`` and ``R8_SNORM`` pixel write code updated to round instead of truncate to better match DirectXMath behavior
-* Fixed bug in standalone WICTextureLoader for DX11/DX12 that resulted in ``WINCODEC_ERR_INSUFFICIENTBUFFER`` for some resize requests
-* Added ``Ex`` variants for DDSTextureLoader/WICTextureLoader for DX9 to support loading resources for non-DEFAULT pools
-* Minor code and project cleanup
+* GamePad class updated with ``c_MostRecent`` constant for ``-1`` player index special behavior
+* Fixed bug in WICTextureLoader that resulted in ``WINCODEC_ERR_INSUFFICIENTBUFFER`` for some resize requests
+* Fixed ``.wav`` file reading of MIDILoop chunk
+* Minor code cleanup
 
 ### August 15, 2020
-* Added ``DDS_FLAGS_ALLOW_LARGE_FILES`` flag for DDS loader to allow textures with dimensions that are too big for Direct3D
-* Added ``FormatDataType`` function
-* Fixed bug with DX12 ``Capture`` with 'small alignment' textures
+* EnvironmentMapEffect now supports cubemaps, spherical, and dual-parabola environment maps
 * Code review and project updates
-* Added GDK projects
-* texassemble: updated with ``-fl`` switch for feature level based warning
-* texconv: updated with ``-reconstructz`` switch for BC5 compressed normal map view conversion
+* *DirectX Tool Kit for Audio* updated for XAudio2Redist 1.2.3
 
 ### July 2, 2020
-* Minor warning fixes for VS 2019 (16.7)
-* CMake updates
-* texassemble: Fixed animated gif handling with transparency
-
-### June 15, 2020
+* Improved SpriteFont drawing performance in Debug builds
+* Regenerated shaders using Windows 10 May 2020 Update SDK (19041)
 * Code cleanup for some new VC++ 16.7 warnings and static code analysis
-* texconv: Updated with support for Portable Pix Map (ppm) & Portable Float Map (pfm) file formats
+* CMake updates
+* *DirectX Tool Kit for Audio* updated for XAudio2Redist 1.2.2
 
 ### June 1, 2020
+* Added BufferHelpers header with functions **CreateStaticBuffer** / **CreateTextureFromMemory**, and the **ConstantBuffer** helper class
+* Added **IsPowerOf2** and **CreateInputLayoutFromEffect** helpers to DirectXHelpers
 * Converted to typed enum bitmask flags (see release notes for details on this potential *breaking change*)
-  + **ComputePitch**, **xxxDDSxxx**, **xxxWICxxx**, **FlipRotate**, **Resize**, **Convert**, **GenerateMipMaps**, **GenerateMipMaps3D**, **PremultiplyAlpha**, **Compress**, **ComputeNormalMap**, **CopyRectangle**, **ComputeMSE**
-* ``WIC_FLAGS_DEFAULT_SRGB`` / ``WIC_LOADER_SRGB_DEFAULT`` flag added when loading image via WIC without explicit colorspace metadata
-*  WIC loader for  ``PNG`` codec now checks ``gAMA`` chunk to determine colorspace if the ``sRGB`` chunk is not found for legacy sRGB detection.
-* Fixed conformance issues when using ``/Zc:preprocessor``
+  + ``AUDIO_ENGINE_FLAGS``, ``ModelLoaderFlags``, ``SOUND_EFFECT_INSTANCE_FLAGS``, and ``WIC_LOADER_FLAGS``
+* WICTextureLoader for ``PNG`` codec now checks ``gAMA`` chunk to determine colorspace if the ``sRGB`` chunk is not found for legacy sRGB detection.
+* ``WIC_LOADER_SRGB_DEFAULT`` flag added when loading image via WIC without explicit colorspace metadata
+* Retired XAudio 2.7 for *DirectX Tool Kit for Audio*. Use XAudio 2.9, XAudio 2.8, or XAudio2Redist instead.
 * CMake project updates
 
 ### May 10, 2020
-* HDR (RGBE Radiance) file format writer updated to accept half16 input
+* WICTextureLoader updated with new loader flags: ``FORCE_RGBA32``, ``FIT_POW2``, and ``MAKE_SQUARE``
+* SimpleMath no longer forces use of d3d11.h or d3d12.h (can be used with d3d9.h for example)
+* *DirectX Tool Kit for Audio* updated with **SoundStreamInstance** class for async I/O playback from XACT-style streaming wavebanks
 * Code cleanup
-* Updated D3DX12 internal copy to Windows 10 SDK (19041) version
-* texassemble, texconv, texdiag: Updated with ``-l`` switch for case-sensitive file systems
-* texconv: Added ``-dx9`` switch to force legacy compatible DDS files
-* texconv: Collapsed ``-bcuniform``, ``-bcdither``, ``-bcquick``, and ``-bcmax`` into one ``-bc`` switch
-* Updates to **DDSTextureLoader**, **ScreenGrab**, and **WICTextureLoader** including new DX9 version
+* xwbtool: Updated with ``-l`` switch for case-sensitive file systems
 
 ### April 3, 2020
-* Updated D3DX12 internal copy to latest version
-* DDS loader updated for another BC7 FourCC variant
+* SpriteFont **MeasureString** / **MeasureDrawBounds** fixes for !ignoreWhitespace
 * Code review (``constexpr`` / ``noexcept`` usage)
 * CMake updated for PCH usage with 3.16 or later
 
-### February 14, 2020
-* Fixed quality bug in BC4S/BC5S compressor
-* Guard for divide-by-zero case in **PremultiplyAlpha**
-* texconv: added ``-at`` switch for alpha threshold value with BC1 compression
-* texconv: Fixed ``-nmap`` when outputting compressed UNORM formats
-* Code and project cleaup
+### February 24, 2020
+* *breaking change* **Model::CreateFromxxx** changed to use ModelLoaderFlags instead of default bool parameters
+* DirectX Tool Kit for Audio updated to support XAudio2Redist NuGet
+* Added ``ignoreWhitespace`` defaulted parameter to SpriteFont Measure methods
+* Fixed encoding issue with Utilities.fxh
+* Code and project cleanup
 * Retired VS 2015 projects
+* xwbtool: Changed ``-n`` switch to a more safe ``-y`` switch
 
 ### December 17, 2019
 * Added ARM64 platform to VS 2019 Win32 desktop Win10 project
+* Added Vector ``operator/`` by float scalar to SimpleMath
 * Updated CMake project
 * Code cleaup
 
 ### October 17, 2019
-* Codec readers updated to return ``TEX_ALPHA_MODE_OPAQUE`` if reader returned an alpha channel due to conversion
-* Added DDS reader support for 'non-standard' BC6H/BC7 FourCC codes used by nVidia texture tools
-* TGA codec updated for TGA 2.0
-* Minor code review
-* Updated ScreenGrab module
-* texconv: Added ``-fixbc4x4switch``
+* Added optional ``forceSRGB`` parameter to **SaveWICTextureToFile**
+* GamePad updated to report VID/PID (when supported)
+* Minor code cleanup
 
 ### August 21, 2019
-* Updated D3DX12 internal copy to latest version
-* Added texassemble, texconv, and texdiag to CMake project
-* Code cleanup
+* Added xwbtool to CMake project
+* Minor code cleanup
 
 ### June 30, 2019
-* Additional validation for Direct3D 11 texture loaders
+* Additional validation for Ex texture loaders
 * Clang/LLVM warning cleanup
-* Renamed ``DirectXTex_Windows10.vcxproj`` to ``_Windows10_2017.vcxproj``
+* Renamed ``DirectXTK_Windows10.vcxproj`` to ``_Windows10_2017.vcxproj``
 * Added VS 2019 UWP project
 
 ### May 30, 2019
-* Regenerated shaders using Windows 10 April 2019 Update SDK (18362)
+* PBREffect updated with additional set methods
 * Added CMake project files
 * Code cleanup
 
 ### April 26, 2019
 * Added VS 2019 desktop projects
+* Fixed guards w.r.t. to windows.h usage in Keyboard/Mouse headers
+* Added C++/WinRT **SetWindow** helper to Keyboard/Mouse
 * Code cleanup for texture loaders
 * Officially dropped Windows Vista support
-* Minor code cleanup
 
 ### February 7, 2019
-* Added **ScaleMipMapsAlphaForCoverage** function to the library
-* WIC Writer now has two new flags: ``WIC_FLAGS_FORCE_SRGB`` and ``WIC_FLAGS_FORCE_LINEAR``
-* texassemble: added ``array-strip`` command
-* texconv: added ``-inverty``, ``-keepcoverage`` switches
+* Model now supports loading _SDKMESH v2_ models
+* **PBREffectFactory** added to support PBR materials
+* PBREffect and NormalMapEffect shaders updated to support ``BC5_UNORM`` compressed normal maps
+* SpriteFont: **DrawString** overloads for UTF-8 chars in addition to UTF-16LE wide chars
 
 ### November 16, 2018
 * VS 2017 updated for Windows 10 October 2018 Update SDK (17763)
 * ARM64 platform configurations added to UWP projects
+* Minor code review
+
+### October 31, 2018
+* Model loader for SDKMESH now attempts to use legacy DE3CN compressed normals
+  + This is an approximation only and emits a warning in debug builds
 
 ### October 25, 2018
 * Use UTF-8 instead of ANSI for narrow strings
-* Updated D3DX12 internal copy to latest version
-* Minor code cleanup
+* Minor code review
 
 ### August 17, 2018
-* Fixed problem loading legacy DDS files containing FOURCC pixel formats with ``ALPHAPIXELS`` also set
-* Fixed ``FlipRotate`` bug when doing 180 degree rotation
+* Improved validation for 16k textures and other large resources
+* Improved debug output for failed texture loads and screengrabs
 * Updated for VS 2017 15.8
-
-### August 5, 2018
-* Improved support and validation for 16k textures (requires x64 native)
-* ``ComputePitch`` now returns an HRESULT
-* Fix BC7 GPU shaders on WARP device
+* Code cleanup
 
 ### July 3, 2018
-* BC7 CPU codec fix for 3subsets/``-bcmax`` and minor optimization
-* BC7 GPU codec quantize fix and pbit optimization
-* BC6H CPU codec bounds checking fix
+* ModelMeshPart **DrawInstanced** method added
 * Code and project cleanup
 
 ### May 31, 2018
-* Fix for **IsAlphaAllOpaque** for 'near opaque' values
 * VS 2017 updated for Windows 10 April 2018 Update SDK (17134)
+* Regenerated shaders using Windows 10 April 2018 Update SDK (17134)
 
-### May 11, 2018
-* Workaround for WIC issue doing FP32->FP16 conversions
+### May 14, 2018
 * Updated for VS 2017 15.7 update warnings
 * Code and project cleanup
 * Retired VS 2013 projects
 
 ### April 23, 2018
-* Code cleanup
-* texconv: Updated with support reading "Extended BMP" files using DXTn
-* texconv: Updated to handle non-power-of-2 volume textures with mipmaps
-* texassemble, texconv, texdiag: support format name aliases like DXT3, RGBA, BGRA, FP16, etc. in addition to truncated ``DXGI_FORMAT_`` values
-
-### February 9, 2018
-* HDR (RGBE Radiance) file format reader updated to support ``#?RGBE`` signature
-* texconv: Added ``-rotatecolor`` and ``-nits`` switches
-* texassemble: Added merge and gif commands
-* texdiag: added dumpdds command
+* ``AlignUp``, ``AlignDown`` template functions in DirectXHelpers.h
+* Mouse support for cursor visibility
+* SimpleMath and VertexTypes updated with default copy and move ctors
+* SimpleMath updates to use ``constexpr``
+* EffectFactory updated with **GetDevice** method
+* PostProcess updated with 'big triangle' optimization
+* Fix for ``CMO`` handling of skinning vertex data
+* Code and project file cleanup
+* xwbtool: Fixed Windows 7 compatibility issue
 
 ### February 7, 2018
-* Fixed bug with GPU BC7 encoding (mode 1, fixup 6)
+* Mouse fix for cursor behavior when using Remote Desktop for Win32
 * Updated for a few more VS 2017 warnings
 * Code cleanup
 
 ### December 13, 2017
+* **PBREffect** and **DebugEffect** added
+* **NormalMapEffect** no longer requires or uses explicit vertex tangents
+* *breaking change* NormalMapEffect::SetBiasedVertexNormalsAndTangents renamed to **SetBiasedVertexNormals**
+* PBREffect, DebugEffect, & NormalMapEffect all require Direct3D hardware feature level 10.0 or better
+* **VertexType** typedef added to GeometricPrimitive as alias for VertexPositionNormalTexture
 * Updated for VS 2017 15.5 update warnings
-* Support building library with ``_XM_NO_XMVECTOR_OVERLOADS_``
 * Code cleanup
 
 ### November 1, 2017
 * VS 2017 updated for Windows 10 Fall Creators Update SDK (16299)
+* Regenerated shaders using Windows 10 Fall Creators Update SDK (16299)
 
 ### September 22, 2017
 * Updated for VS 2017 15.3 update ``/permissive-`` changes
-* WIC writer and ScreenGrab updated to use non-sRGB metadata for PNG
-* texassemble, texconv, texdiag: added ``-flist`` option
+* **ScreenGrab** updated to use non-sRGB metadata for PNG
+* Mouse use of ``WM_INPUT`` updated for Remote Desktop scenarios
+* Fix for ``CMO`` load issue when no materials are defined
+* xwbtool: added ``-flist`` option
 
-### July 26, 2017
-* Support for reading non-standard DDS files written by nVidia Texture Tools (NVTT)
-* Fix for **ComputeMSE** when using ``CMSE_IMAGE2_X2_BIAS``
-* Fix for WIC writer then codec target format requires a palette
+### July 28, 2017
+* Fix for WIC writer when codec target format requires a palette
 * Code cleanup
+
+### June 21, 2017
+* Post-processing support with the **BasicPostProcess**, **DualPostProcess**, and **ToneMapPostProcess** classes
+* SDKMESH loader fix when loading legacy files with all zero materials
+* DirectXTK for Audio: Minor fixes for environmental audio
+* Minor code cleanup
 
 ### April 24, 2017
 * VS 2017 project updates
 * Regenerated shaders using Windows 10 Creators Update SDK (15063)
-* Updated D3DX12 internal copy to latest version
+* Fixed **NormalMapEffect** shader selection for specular texture usage
+* Fixed **AudioEngine** enumeration when using Single Threaded Apartment (STA)
+* Fixed bug with **GamePad** (Windows.Gaming.Input) when no user bound
 
 ### April 7, 2017
 * VS 2017 updated for Windows Creators Update SDK (15063)
-* texassemble: ``-tonemap`` switch
-* texconv: ``-wicmulti`` switch
+* XboxDDSTextureLoader updates
 
-### January 31, 2017
-* DirectX 12 versions of **IsSupported**, **CreateTexture** (PrepareUpload), and **CaptureTexture**
-* Update to DirectX 11 version of **IsSupported**
+### February 10, 2017
+* **GamePad** now supports special value of ``-1`` for 'most recently connected controller'
 * WIC format 40bppCMYKAlpha should be converted to RGBA8 rather than RGBA16
-* DDS support for L8A8 with bit-count 8 rather than 16
-* ``DXGI_FORMAT_R32G8X24_TYPELESS`` and ``DXGI_FORMAT_R24G8_TYPELESS`` should be IsDepthStencil formats
-* Updates to DDSTextureLoader, ScreenGrab, and WICTextureLoader
+* DDS support for L8A8 with bitcount 8 rather than 16
 * Minor code cleanup
 
 ### December 5, 2016
-* Fixed over-validation in DDS header parsing
+* Mouse and Keyboard classes updated with **IsConnected** method
+* Windows10 project ``/ZW`` switch removed to support use in C++/WinRT projection apps
 * VS 2017 RC projects added
 * Minor code cleanup
 
-### October 5, 2016
-* *breaking change* Renamed Evaluate to **EvaluateImage**, Transform to **TransformImage**
-* texdiag: new command-line tool for texture debugging
-* texconv: ``-bcmax``, ``-bcquick``, ``-tonemap``, and ``-x2bias`` switches
-* texconv: overwrite writing and ``-y`` switch
-* texconv/texassemble: optional OpenEXR support
-* texassemble: command syntax with support for generating strip and cross images from cubemap
-* Updates to DDSTextureLoader, WICTextureLoader, and ScreenGrab
+### October 6, 2016
+* SDKMESH loader and BasicEffects support for compressed vertex normals with biasing
+* WICTextureLoader Ex bool forceSRGB parameter is now a **WIC_LOADER_FLAGS** flag
 * Minor code cleanup
 
-### September 14, 2016
-* [HDR (RGBE Radiance)](https://en.wikipedia.org/wiki/RGBE_image_format) file format reader and writer
-* **Evaluate** and **Transform** functions for computing user-defined functions on images
-* Fix BC6H GPU shaders on WARP device
-* Fix for alignment issues on ARM devices in software compression codec
-* Added ``TEX_THRESHOLD_DEFAULT`` (0.5f) constant default alpha threshold value for Convert & Compress
-* Minor **CaptureTexture** optimization
-* texconv/texassemble: Support for .hdr file format
-* texconv: added ``-gpu`` switch to specify adapter to use for GPU-based compression codecs
-* texconv: added ``-badtails`` switch to enable loading of legacy DXTn DDS files with incomplete mipchain tails
-* texconv: added ``-c`` switch for old-school colorkey/chromakey transparency to alpha conversion
-* texconv: added ``-alpha`` switch for reverse premultiply along with ``TEX_PMALPHA_REVERSE`` flag
-* texconv: added wildcard support for input filename and optional ``-r`` switch for recursive search
+### September 15, 2016
+* Minor code cleanup
+* xwbtool: added wildcard support for input filename and optional ``-r`` switch for recursive search
+
+### September 1, 2016
+* Added ``forceSRGB`` optional parameter to SpriteFont ctor
+* EffectFactory method **EnableForceSRGB** added
+* DGSLEffect now defaults to diffuse/alpha of 1
+* Removed problematic ABI::Windows::Foundation::Rect interop for SimpleMath
+* Minor code cleanup
 
 ### August 4, 2016
-* ``CompileShader`` script updated to build external pdbs
 * Regenerated shaders using Windows 10 Anniversary Update SDK (14393)
 
 ### August 2, 2016
 * Updated for VS 2015 Update 3 and Windows 10 SDK (14393)
 
 ### August 1, 2016
-* Workaround for bug in XMStoreFloat3SE (impacts conversions to ``DXGI_FORMAT_R9G9B9E5_SHAREDEXP``)
-* **DDSTextureLoader12**, **WICTextureLoader12**, and **ScreenGrab12** for Direct3D 12 support
+* GamePad capabilities information updated for Universal Windows and Xbox One platforms
+* Specular falloff lighting computation fix in shaders
+
+### July 18, 2016
+* **NormalMapEffect** for normal-map with optional specular map rendering
+* **EnvironmentMapEffect** now supports per-pixel lighting
+* Effects updated with **SetMatrices** and **SetColorAndAlpha** methods
+* SimpleMath: improved interop with DirectXMath constants
 * Minor code cleanup
 
-### June 27, 2016
-* texconv command-line tool ``-wicq`` and ``-wiclossless`` switches
+### June 30, 2016
+* **MeasureDrawString** added to SpriteFont; bad fix to MeasureString reverted
+* GamePad tracker updated to track emulated buttons (i.e. leftStickUp)
+* EffectFactory **SetDirectory** now checks current working directory (CWD) as well
+* *breaking change* must include <d3d11.h> before including <SimpleMath.h>
+* Code refactor for sharing some files with DirectX 12 version
+* Minor code cleanup
+
+### May 31, 2016
+* Added **VertexPosition** and **VertexPositionDualTexture** to VertexTypes
+* Xbox One platform fix for PrimitiveBatch
+* CompileShader script updated to build external pdbs
 * Code cleanup
 
 ### April 26, 2016
-* Optional callback from WIC reader functions to query additional metadata
-* Retired obsolete adapter code
-* Minor code cleanup
+* Added **Rectangle** class to SimpleMath
+* Fix for SDKMESH loader when loading models with 'extra' texture coordinate sets
+* Made SimpleMath's Viewport **ComputeTitleSafeArea** less conservative
+* Added view/menu aliases to GamePad::ButtonStateTracker for Xbox One Controller naming
+* Retired Windows phone 8.0 projects and obsolete adapter code
+* Minor code and project file cleanup
 
 ### February 23, 2016
+* Fixed width computation bug in **SpriteFont::MeasureString**
 * Fix to clean up partial or zero-length image files on failed write
+* Fix to WaveBankReader for UWP platform
 * Retired VS 2012 projects
+* Xbox One platform updates
+* Minor code and project file cleanup
+
+### January 5, 2016
+* Xbox One platform updates
+* *breaking change* Need to add use of **GraphicsMemory** class to Xbox One titles
+* Minor code cleanup
 
 ### November 30, 2015
-* texconv command-line tool ``-fl`` switch now supports 12.0 and 12.1 feature levels
+* SimpleMath improvements including Viewport class
+* Fixed bug with **Keyboard** for ``OpenBracket`` and later VK codes
+* Fixed bug with **Mouse** that reset the scrollwheel on app activate
+* ``MakeSpriteFont`` updated with ``/FastPack`` and ``/FeatureLevel`` switches
 * Updated for VS 2015 Update 1 and Windows 10 SDK (10586)
 
 ### October 30, 2015
+* DirectXTK for Audio 3D updates
+* *breaking change* emitters/listeners now use RH coordinates by default
+* **GeometricPrimitive** support for custom geometry
+* SimpleMath Matrix class improvements
 * DDS support for legacy bumpmap formats (V8U8, Q8W8V8U8, V16U16)
-* Fix for buffer overread in BC CPU compressor
+* Mouse fix for WinRT implementation with multiple buttons pressed
+* Wireframe **CommonStates** no longer does backface culling
+* Xbox One platform updates
 * Minor code cleanup
 
 ### August 18, 2015
-* Added **GetWICFactory** and **SetWICFactory**
-* Updates for new DXGI 1.3 types
 * Xbox One platform updates
 
 ### July 29, 2015
-* Fixed rounding problem with 32-bit RGBA/BGRA format conversions
-* texconv: use CPU parallel compression for BC1-BC5 (``-singleproc`` disables)
+* Added **CreateBox** method to GeometricPrimitive
+* Added ``invertn`` optional parameter to **CreateSphere**
+* Updates for Keyboard, Mouse class
+* Fixed bug when loading older SDKMESH models
 * Updated for VS 2015 and Windows 10 SDK RTM
-* Retired VS 2010 and Windows 8.0 Store projects
+* Retired VS 2010 and Windows Store 8.0 projects
 
-### June 18, 2015
-* New ``BC_FLAGS_USE_3SUBSETS`` option for BC7 compressors; now defaults to skipping 3 subset blocks
-* Fixed bug with **MakeTypeless** and ``A8_UNORM``
-* Fixed file length validation problem in **LoadDDSFromFile**
+### July 1, 2015
+* Added **Keyboard**, **Mouse** class
+* Support for loading pre-lit models with SDKMESH
+* **GamePad** implemented using ``Windows.Gaming.Input`` for Windows 10
+* DirectXTK for Audio updates for xWMA support with XAudio 2.9
+* Added **FindGlyph** and **GetSpriteSheet** methods to SpriteFont
 
 ### March 27, 2015
 * Added projects for Windows apps Technical Preview
-* Fixed bug with WIC-based mipmap generation for non-WIC supported formats
-* Fixed bug with WIC multiframe loader when resizing required
-* texconv: Added ``-nmap``/``-nmapamp`` for generating normal maps from height maps
-* texconv/texassemble: Updated to load multiframe WIC files (tiff, gif)
-* Minor code cleanup
+* GamePad temporarily uses 'null' device for universal Windows application platform
+
+### February 25, 2015
+* DirectXTK for Audio updates
+  + *breaking change* pitch now defined as -1 to 1 with 0 as the default
+  + One-shot Play method with volume, pitch, and pan
+  + **GetMasterVolume** / **SetMasterVolume** method for AudioEngine
+  + Fix for compact wavebank validation
+  + Improved voice cleanup and shutdown
+* Minor code cleanup and C++11 ``=default``/``=delete`` usage
+
+### January 26, 2015
+* GamePad class: emulate ``XInputEnable`` behavior for XInput 9.1.0
+* DirectXTK for Audio fix for Stop followed by Play doing a proper restart
+* DirectXTK for Audio fix when using XAudio 2.7 on a system with no audio device
+* Updates for Xbox One platform support
+* Minor code cleanup and C99 ``printf`` string conformance
 
 ### November 24, 2014
+* SimpleMath fix for Matrix ``operator !=``
+* DirectXTK for Audio workaround for XAudio 2.7 on Windows 7 problem
+* Updates for Windows phone 8.1 platform support
 * Updates for Visual Studio 2015 Technical Preview
 * Minor code cleanup
 
-### September 22, 2014
-* Format conversion improvements and bug fixes (depth/stencil, alpha-only, float16, RGB -> 1 channel)
-* Fixed issue when BC decompressing non-standard compressed rowPitch images
-* Explicit calling-convention annotation for all 'public' functions
-* Code cleanup
-* Xbox One platform updates
+### October 28, 2014
+* Model support for loading from ``VBO`` files
+* Model render now sets samplers on slots 0,1 by default for dual-texture effects
+* Updates for Xbox One platform support
+* Minor code cleanup
+
+### September 5, 2014
+* **GamePad** class: gamepad controller helper using XInput on Windows, IGamepad for Xbox One
+* SimpleMath updates; Matrix billboard methods; *breaking change*: Matrix::Identity() -> Matrix::Identity
+* SpriteBatch new optional **SetViewport** method
+* SpriteFont fix for white-space character rendering optimization
+* DDSTextureLoader fix for auto-gen mipmaps for volume textures
+* Explicit calling-convention annotation for public headers
+* Updates for Xbox One platform support
+* Minor code and project cleanup
 
 ### July 15, 2014
-* texconv command-line tool fixes
-* Fixed problem with 'wide' images with CPU **Compress**
+* DirectXTK for Audio and XWBTool fixes
 * Updates to Xbox One platform support
 
 ### April 3, 2014
 * Windows phone 8.1 platform support
 
 ### February 24, 2014
-* Direct3D 11 video and Xbox One extended format support
-* New APIs: **IsPlanar**, **IsPalettized**, **IsDepthStencil**, **ConvertToSinglePlane**
-* Added 'alphaWeight' parameter to GPU **Compress** *breaking change*
-* texconv ``-aw`` switch to control the alpha weighting for the BC7 GPU compressor
-* Fixed bug with ordered dithering in non-WIC conversion codepaths
-* Fixed **SaveToDDSxxx** functions when using arbitrary row pitch values
+* DirectXHelper: new utility header with **MapGuard** and public version of **SetDebugObjectName** template
+* DDSTextureLoader: Optional support for auto-gen mipmaps
+* DDSTextureLoader/ScreenGrab: support for Direct3D 11 video formats including legacy "YUY2" DDS files
+* GeometricPrimtive: Handedness fix for tetrahedron, octahedron, dodecahedron, and icosahedron
+* ``SpriteBatch::SetRotation(DXGI_MODE_ROTATION_UNSPECIFIED)`` to disable viewport matrix
+* XboxDDSTextureLoader: optional forceSRGB parameter
 
 ### January 24, 2014
-* Added sRGB flags for **Compress** (``TEX_COMPRESS_SRGB*``)
-* Added 'compress' flag parameter to GPU versions of **Compress** *breaking change*
-* Minor fix for potential rounding problem in GPU **Compress**
-* Code cleanup (removed ``DXGI_1_2_FORMATS`` control define; ``ScopedObject`` typedef removed)
-* Dropped VS 2010 support without the Windows 8.1 SDK (removed ``USE_XNAMATH`` control define)
+* DirectXTK for Audio updated with voice management and optional mastering volume limiter
+* Added orientation rotation support to **SpriteBatch**
+* Fixed a resource leak with ``GetDefaultTexture`` used by some Effects
+* Code cleanup (removed ``DXGI_1_2_FORMATS`` control define; d2d1.h workaround not needed; ScopedObject typedef removed)
 
 ### December 24, 2013
-* texconv updated with ``-fl`` and ``-pow2`` command-line switches
-* Fixed bug in **Resize** when doing custom filtering which occurred when exactly doubling the image size
-* Added move operators to **ScratchImage** and **Blob** classes
+* Added **DirectX Tool Kit for Audio** using XAudio2
 * Xbox One platform support
+* ``MakeSpriteFont`` tool updated with more progress feedback when capturing large fonts
+* Minor updates for ``SDKMESH`` Model loader
+* Fixed bug in ``CMO`` Model loader when handling multiple textures
+* Improved debugging output
 
-### October 21, 2013
+### October 28, 2013
 * Updated for Visual Studio 2013 and Windows 8.1 SDK RTM
-* **PremultiplyAlpha** updated with new 'flags' parameter and to use sRGB correct blending
-* Fixed colorspace conversion issue with DirectCompute compressor when compressing for BC7 SRGB
-
-### August 13, 2013
-* DirectCompute 4.0 BC6H/BC7 compressor integration
-* texconv utility uses DirectCompute compression by default for BC6H/BC7, ``-nogpu`` disables use of DirectCompute
-
-### August 1, 2013
-* Support for BC compression/decompression of non-power-of-2 mipmapped textures
-* Fixes for BC6H / BC7 codecs to better match published standard
-* Fix for BC4 / BC5 codecs when compressing RGB images
-* Minor fix for the BC1-3 codec
-* New optional flags for **ComputeMSE** to compare UNORM vs. SNORM images
-* New WIC loading flag added to control use of WIC metadata to return sRGB vs. non-sRGB formats
-* Code cleanup and /analyze fixes
-* Project file cleanup
-* texconv utility uses parallel BC compression by default for BC6H/BC7, ``-singleproc`` disables multithreaded behavior
+* Added **DGSLEffect**, **DGSLEffectFactory**, **VertexPositionNormalTangentColorTexture**, and **VertexPositionNormalTangentColorTextureSkinning**
+* Model loading and effect factories support loading skinned models
+* ``MakeSpriteFont`` now has a smooth vs. sharp antialiasing option: /sharp
+* Model loading from ``CMOs`` now handles UV transforms for texture coordinates
+* A number of small fixes for **EffectFactory**
+* Minor code and project cleanup
+* Added ``NO_D3D11_DEBUG_NAME`` compilation define to control population of Direct3D debug layer names for debug builds
 
 ### July 1, 2013
-* VS 2013 Preview projects added
-* SaveToWIC functions updated with new optional ``setCustomProps`` parameter
+* VS 2013 Preview projects added and updates for DirectXMath 3.05 ``__vectorcall``
+* Added use of sRGB WIC metadata for ``JPEG``, ``PNG``, and ``TIFF``
+* SaveToWIC functions updated with new optional setCustomProps parameter and error check with optional targetFormat
 
-### June 15, 2013
-* Custom filtering implementation for **Resize** & **GenerateMipMaps(3D)** - Point, Box, Linear, Cubic, and Triangle
-  + ``TEX_FILTER_TRIANGLE`` finite low-pass triangle filter
-  + ``TEX_FILTER_WRAP``, ``TEX_FILTER_MIRROR`` texture semantics for custom filtering
-  + ``TEX_FILTER_BOX`` alias for ``TEX_FILTER_FANT WIC``
-* Ordered and error diffusion dithering for non-WIC conversion
-* sRGB gamma correct custom filtering and conversion
-* ``DDS_FLAGS_EXPAND_LUMINANCE`` - Reader conversion option for L8, L16, and A8L8 legacy DDS files
-* Added use of WIC metadata for sRGB pixel formats
-* Added **BitsPerColor** utility function
-* Fixed **Convert** threshold parameter usage
-* Non-power-of-2 volume map support, fixed bug with non-square volume maps
-* texconv utility update with ``-xlum``, ``-wrap``, and ``-mirror`` options; reworked ``-if`` options for improved dithering
-* texassemble utility for creating cubemaps, volume maps, and texture arrays
-* DDSTextureLoader and WICTextureLoader sync'd with DirectXTK versions
+### May 30, 2013
+* Added more **GeometricPrimitives**: Cone, Tetrahedron, Octahedron, Dodecahedron, Icosahedron
+* Updated to support loading new metadata from DDS files (if present)
+* Fixed bug with loading of WIC 32bpp RGBE format images
+* Fixed bug when skipping mipmaps in a 1D or 2D array texture DDS file
 
-### April 16, 2013
-* Updated alpha-mode metadata details in .DDS files
-* Added new control flags for **Convert**
-* Added new optional flags for **ComputeMSE**
-* Fixed conversion handling for sRGB formats
-* Fixed internal routines for handling ``R10G10B10_XR_BIAS_A2_UNORM``, ``R9G9B9E5_SHAREDEXP``, and ``FORMAT_R1_UNORM``
-* Fixed WIC I/O for ``GUID_WICPixelFormat32bppRGBE``4 pixel format files (HD Photo)
-* Fixed non-square image handling in **GenerateMipMaps3D**
-* Fixed some error handling in the DDS load code
+### February 22, 2013
+* Added **SimpleMath** header
+* Fixed bug that prevented properly overriding EffectFactory::CreateTexture
+* Fixed forceSRGB logic in DDSTextureLoader and WICTextureLoader
+* Break circular reference chains when using SpriteBatch with a setCustomShaders lambda
+* Updated projects with ``/fp:fast`` for all configs, ``/arch:SSE2`` for Win32 configs
+* Sensibly named .pdb output files
+* Added ``WIC_USE_FACTORY_PROXY`` build option (uses WindowsCodecs.dll entrypoint rather than CoCreateInstance)
 
-### March 22, 2013
-* Supports reading and writing alpha-mode (straight, premultiplied, etc.) metadata in .DDS files
-* Added build option to use WICCreateImagingFactory_Proxy instead of ``CoCreateInstance`` to obtain WIC factory
-
-### January 29, 2013
-* Added **PremultiplyAlpha** to DirectXTex; ``-pmalpha`` switch for texconv command-line tool
-* Fixed problem with forceSRGB implementation for Ex versions of CreateTexture, CreateShaderResourceView, DDSTextureLoader and WICTextureLoader
+### January 25, 2013
+* **GeometricPrimitive** support for left-handed coordinates and drawing with custom effects
+* Model, ModelMesh, and ModelMeshPart added with loading of rigid non-animating models from .CMO and .SDKMESH files
+* EffectFactory helper class added
 
 ### December 11, 2012
-* Ex versions of **CreateTexture**, **CreateShaderResourceView**, **DDSTextureLoader** and **WICTextureLoader**
-* Fixed BC2 and BC3 decompression issue for unusual color encoding case
-* Converted annotation to SAL2 for improved VS 2012 /analyze experience
-* Updated DirectXTex, DDSView, and Texconv with VS 2010 + Windows 8.0 SDK project using official 'property sheets'
+* Ex versions of **DDSTextureLoader** and **WICTextureLoader**
+* Removed use of ATL's ``CComPtr`` in favor of WRL's ``ComPtr`` for all platforms to support VS Express editions
+* Updated VS 2010 project for official 'property sheet' integration for Windows 8.0 SDK
+* Minor fix to **CommonStates** for Feature Level 9.1
+* Tweaked AlphaTestEffect.cpp to work around ARM NEON compiler codegen bug
+* Added dxguid.lib as a default library for Debug builds to resolve GUID link issues
 
 ### November 15, 2012
 * Added support for WIC2 when available on Windows 8 and Windows 7 with KB 2670838
-* Added optional ``targetGUID`` parameter to SaveWIC* APIs to influence final container pixel format choice
-* Fixed bug in **SaveDDSxxx** which was generating invalid DDS files for 1D dimension textures
-* Improved robustness of **CaptureTexture** when resolving MSAA source textures
-* Sync'd DDSTextureLoader, ScreenGrab, and WICTextureLoader standalone versions with latest DirectXTK release
+* Cleaned up warning level 4 warnings
 
-### September 28, 2012
-* Added **ScreenGrab** module for creating runtime screenshots
+### October 30, 2012
+* Added project files for Windows phone 8
+
+### October 12, 2012
+* Added **PrimitiveBatch** for drawing user primitives
+* Debug object names for all D3D resources (for PIX and debug layer leak reporting)
+
+### October 2, 2012
+* Added **ScreenGrab** module
+* Added **CreateGeoSphere** for drawing a geodesic sphere
+* Put DDSTextureLoader and WICTextureLoader into the DirectX C++ namespace
+
+### September 7, 2012
 * Renamed project files for better naming consistency
-* New Typeless utilities for DirectXTex
-* Some minor code cleanup for DirectXTex's WIC writer function
-* Bug fixes and new ``-tu``/``-tf`` options for texconv
-
-### June 22, 2012
-* Moved to using XNA Math 2.05 instead of XNA Math 2.04 for ``USE_XNAMATH`` builds
-* Fixed BGR vs. RGB color channel swizzle problem with 24bpp legacy .DDS files in DirectXTex
-* Update to DirectXTex WIC and WICTextureLoader for additional 96bpp float format handling on Windows 8
+* Updated WICTextureLoader for Windows 8 96bpp floating-point formats
+* Win32 desktop projects updated to use Windows Vista (0x0600) rather than Windows 7 (0x0601) APIs
+* Tweaked SpriteBatch.cpp to workaround ARM NEON compiler codegen bug
 
 ### May 31, 2012
+* Updated Windows Store project for Visual Studio 2012 Release Candidate changes
+* Cleaned up x64 Debug configuration warnings and switched to use ``_DEBUG`` instead of ``DEBUG``
 * Minor fix for DDSTextureLoader's retry fallback that can happen with 10level9 feature levels
-* Switched to use ``_DEBUG`` instead of ``DEBUG`` and cleaned up debug warnings
-* added Windows Store style application project files for DirectXTex
 
-### April 20, 2012
-* DirectTex's WIC-based writer opts-in for the Windows 8 BMP encoder option for writing 32 bpp RGBA files with the ``BITMAPV5HEADER``
+### May 2, 2012
+* Added **SpriteFont** implementation and the MakeSpriteFont utility
 
-### March 30, 2012
-* WICTextureLoader updated with Windows 8 WIC pixel formats
-* DirectXTex updated with limited non-power-of-2 texture support and ``TEX_FILTER_SEPARATE_ALPHA`` option
-* Texconv updated with ``-sepalpha`` command-line option
-* Added ``USE_XNAMATH`` control define to build DirectXTex using either XNAMath or DirectXMath
-* Added VS 2012 project files (which use DirectXMath instead of XNAMath and define ``DXGI_1_2_FORMATS``)
+### March 29, 2012
+* WICTextureLoader updated with Windows 8 WIC native pixel formats
 
-### March 15, 2012
-* Fix for resource leak in **CreateShaderResourceView** Direct3D 11 helper function in DirectXTex
+### March 6, 2012
+* Fix for too much temp memory used by WICTextureLoader
+* Add separate Visual Studio 11 projects for Desktop vs. Windows Store builds
 
 ### March 5, 2012
-* Fix for too much temp memory allocated by WICTextureLoader; cleaned up legacy 'min/max' macro usage in DirectXTex
+* Bug fix for SpriteBatch with batches > 2048
 
-### February 21, 2012
-* WICTextureLoader updated to handle systems and device drivers without BGRA or 16bpp format support
-
-### February 20, 2012
-* Some code cleanup for DirectXTex and DDSTextureLoader
-* Fixed bug in 10:10:10:2 format fixup in the **LoadDDSFromMemory** function
-* Fixed bugs in "non-zero alpha" special-case handling in **LoadTGAFromFile**
-* Fixed bug in ``_SwizzleScanline`` when copying alpha channel for BGRA<->RGBA swizzling
-
-### February 11, 2012
-* Update of DDSTextureLoader to also build in Windows Store style apps; added **WICTextureLoader**
-* Added CMYK WIC pixel formats to the DirectXTex conversion table
-
-### January 30, 2012
-* Minor code-cleanup for DirectXTex to enable use of PCH through 'directxtexp.h' header
-
-### January 24, 2012
-* Some code-cleanup for DirectXTex
-* Added DXGI 1.2 implementation for DDSTextureLoader and DirectXTex guarded with ``DXGI_1_2_FORMATS`` compilation define
-
-### December 16, 2011
-* Fixed x64 compilation warnings in DDSTextureLoader
-
-### November 30, 2011
-* Fixed some of the constants used in **IsSupportedTexture**
-* added ability to strip off top levels of mips in DDSTextureLoader
-* changed DirectXTex to use CoCreateInstance rather than LoadLibrary to obtain the WIC factory
-* a few minor ``/analyze`` related annotations for DirectXTex
-
-### October 27, 2011
+### February 24, 2012
 * Original release

@@ -4,10 +4,8 @@
       "directxmath",
       "directx-headers",
       {
-        "name": "openexr",
-        "platform": "linux | (windows & !arm64ec)"
-      },
-      "libpng",
-      "libjpeg-turbo"
+        "name": "xaudio2redist",
+        "platform": "windows & !arm"
+      }
     ]
-}
+  }

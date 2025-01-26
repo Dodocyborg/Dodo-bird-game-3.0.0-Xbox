@@ -118,36 +118,22 @@
     },
 
     {
-      "name": "Win8",
+      "name": "XAudio2Redist",
       "cacheVariables": {
-        "BUILD_DX12": false
+        "BUILD_XAUDIO_WIN10": false,
+        "BUILD_XAUDIO_WIN8": false,
+        "BUILD_XAUDIO_REDIST": true,
+        "BUILD_XINPUT": true
       },
       "hidden": true
     },
     {
-      "name": "GDKX",
+      "name": "Win10",
       "cacheVariables": {
-        "BUILD_XBOX_EXTS_XBOXONE": true
-      },
-      "environment": {
-        "XboxOneXDKLatest": ""
-      },
-      "hidden": true
-    },
-    {
-      "name": "GDKXS",
-      "cacheVariables": {
-        "BUILD_XBOX_EXTS_SCARLETT": true
-      },
-      "hidden": true
-    },
-    {
-      "name": "XDK",
-      "cacheVariables": {
-        "BUILD_XBOX_EXTS_XBOXONE": true
-      },
-      "environment": {
-        "GameDKLatest": ""
+        "BUILD_XAUDIO_WIN10": true,
+        "BUILD_XAUDIO_WIN8": false,
+        "BUILD_XAUDIO_REDIST": false,
+        "BUILD_WGI": true
       },
       "hidden": true
     },
@@ -155,29 +141,25 @@
       "name": "UWP",
       "cacheVariables": {
         "CMAKE_SYSTEM_NAME": "WindowsStore",
-        "CMAKE_SYSTEM_VERSION": "10.0",
-        "BUILD_DX12": true
+        "CMAKE_SYSTEM_VERSION": "10.0"
       },
       "hidden": true
     },
     {
-      "name": "Scarlett",
+      "name": "GDK",
       "cacheVariables": {
-        "XBOX_CONSOLE_TARGET": "scarlett"
-      },
-      "hidden": true
-    },
-    {
-      "name": "XboxOne",
-      "cacheVariables": {
-        "XBOX_CONSOLE_TARGET": "xboxone"
+        "BUILD_XAUDIO_WIN10": true,
+        "BUILD_XAUDIO_WIN8": false,
+        "BUILD_XAUDIO_REDIST": false,
+        "BUILD_GAMEINPUT": true
       },
       "hidden": true
     },
     {
       "name": "Durango",
       "cacheVariables": {
-        "XBOX_CONSOLE_TARGET": "durango"
+        "XBOX_CONSOLE_TARGET": "durango",
+        "BUILD_TESTING": false
       },
       "hidden": true
     },
@@ -188,21 +170,6 @@
           "value": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
           "type": "FILEPATH"
         }
-      },
-      "hidden": true
-    },
-    {
-      "name": "EXR",
-      "cacheVariables": {
-        "ENABLE_OPENEXR_SUPPORT": true
-      },
-      "hidden": true
-    },
-    {
-      "name": "JPEG_PNG",
-      "cacheVariables": {
-        "ENABLE_LIBJPEG_SUPPORT": true,
-        "ENABLE_LIBPNG_SUPPORT": true
       },
       "hidden": true
     },
@@ -278,14 +245,20 @@
       "hidden": true
     },
 
-    { "name": "x64-Debug"      , "description": "MSVC for x64 (Debug) with DX12", "inherits": [ "base", "x64", "Debug", "MSVC" ] },
-    { "name": "x64-Release"    , "description": "MSVC for x64 (Release) with DX12", "inherits": [ "base", "x64", "Release", "MSVC" ] },
-    { "name": "x86-Debug"      , "description": "MSVC for x86 (Debug) with DX12", "inherits": [ "base", "x86", "Debug", "MSVC" ] },
-    { "name": "x86-Release"    , "description": "MSVC for x86 (Release) with DX12", "inherits": [ "base", "x86", "Release", "MSVC" ] },
-    { "name": "arm64-Debug"    , "description": "MSVC for ARM64 (Debug) with DX12", "inherits": [ "base", "ARM64", "Debug", "MSVC" ] },
-    { "name": "arm64-Release"  , "description": "MSVC for ARM64 (Release) with DX12", "inherits": [ "base", "ARM64", "Release", "MSVC" ] },
-    { "name": "arm64ec-Debug"  , "description": "MSVC for ARM64EC (Debug) with DX12", "inherits": [ "base", "ARM64EC", "Debug", "MSVC" ] },
-    { "name": "arm64ec-Release", "description": "MSVC for ARM64EC (Release) with DX12", "inherits": [ "base", "ARM64EC", "Release", "MSVC" ] },
+    { "name": "x64-Debug"    , "description": "MSVC for x64 (Debug) for Windows 8", "inherits": [ "base", "x64", "Debug", "MSVC" ] },
+    { "name": "x64-Release"  , "description": "MSVC for x64 (Release) for Windows 8", "inherits": [ "base", "x64", "Release", "MSVC" ] },
+    { "name": "x86-Debug"    , "description": "MSVC for x86 (Debug) for Windows 8", "inherits": [ "base", "x86", "Debug", "MSVC" ] },
+    { "name": "x86-Release"  , "description": "MSVC for x86 (Release) for Windows 8", "inherits": [ "base", "x86", "Release", "MSVC" ] },
+
+    { "name": "x64-Debug-Win10"   , "description": "MSVC for x64 (Debug) for Windows 10", "inherits": [ "base", "x64", "Debug", "MSVC", "Win10" ] },
+    { "name": "x64-Release-Win10" , "description": "MSVC for x64 (Release) for Windows 10", "inherits": [ "base", "x64", "Release", "MSVC", "Win10" ] },
+    { "name": "x86-Debug-Win10"   , "description": "MSVC for x86 (Debug) for Windows 10", "inherits": [ "base", "x86", "Debug", "MSVC", "Win10" ] },
+    { "name": "x86-Release-Win10" , "description": "MSVC for x86 (Release) for Windows 10", "inherits": [ "base", "x86", "Release", "MSVC", "Win10" ] },
+
+    { "name": "arm64-Debug"     , "description": "MSVC for ARM64 (Debug) for Windows 10", "inherits": [ "base", "ARM64", "Debug", "MSVC", "Win10" ] },
+    { "name": "arm64-Release"   , "description": "MSVC for ARM64 (Release) for Windows 10", "inherits": [ "base", "ARM64", "Release", "MSVC", "Win10" ] },
+    { "name": "arm64ec-Debug"   , "description": "MSVC for ARM64EC (Debug) for Windows 10", "inherits": [ "base", "ARM64EC", "Debug", "MSVC", "Win10" ] },
+    { "name": "arm64ec-Release" , "description": "MSVC for ARM64EC (Release) for Windows 10", "inherits": [ "base", "ARM64EC", "Release", "MSVC", "Win10" ] },
 
     { "name": "x64-Debug-UWP"    , "description": "MSVC for x64 (Debug) for UWP", "inherits": [ "base", "x64", "Debug", "MSVC", "UWP" ] },
     { "name": "x64-Release-UWP"  , "description": "MSVC for x64 (Release) for UWP", "inherits": [ "base", "x64", "Release", "MSVC", "UWP" ] },
@@ -294,41 +267,39 @@
     { "name": "arm64-Debug-UWP"  , "description": "MSVC for ARM64 (Debug) for UWP", "inherits": [ "base", "ARM64", "Debug", "MSVC", "UWP" ] },
     { "name": "arm64-Release-UWP", "description": "MSVC for ARM64 (Release) for UWP", "inherits": [ "base", "ARM64", "Release", "MSVC", "UWP" ] },
 
-    { "name": "x64-Debug-Win8"    , "description": "MSVC for x64 (Debug) for Windows 8.1", "inherits": [ "base", "x64", "Debug", "MSVC", "Win8" ] },
-    { "name": "x64-Release-Win8"  , "description": "MSVC for x64 (Release) for Windows 8.1", "inherits": [ "base", "x64", "Release", "MSVC", "Win8" ] },
-    { "name": "x86-Debug-Win8"    , "description": "MSVC for x86 (Debug) for Windows 8.1", "inherits": [ "base", "x86", "Debug", "MSVC", "Win8" ] },
-    { "name": "x86-Release-Win8"  , "description": "MSVC for x86 (Release) for Windows 8.1", "inherits": [ "base", "x86", "Release", "MSVC", "Win8" ] },
+    { "name": "x64-Debug-Redist"  , "description": "MSVC for x64 (Debug) with XAudio2Redist", "inherits": [ "base", "x64", "Debug", "MSVC", "XAudio2Redist", "VCPKG" ] },
+    { "name": "x64-Release-Redist", "description": "MSVC for x64 (Release) with XAudio2Redist", "inherits": [ "base", "x64", "Release", "MSVC", "XAudio2Redist", "VCPKG" ] },
+    { "name": "x86-Debug-Redist"  , "description": "MSVC for x86 (Debug) with XAudio2Redist", "inherits": [ "base", "x86", "Debug", "MSVC", "XAudio2Redist", "VCPKG" ] },
+    { "name": "x86-Release-Redist", "description": "MSVC for x86 (Release) with XAudio2Redist", "inherits": [ "base", "x86", "Release", "MSVC", "XAudio2Redist", "VCPKG" ] },
 
-    { "name": "x64-Debug-Scarlett"    , "description": "MSVC for x64 (Debug) for Xbox Series X|S", "inherits": [ "base", "x64", "Debug", "MSVC", "Scarlett" ] },
-    { "name": "x64-Release-Scarlett"  , "description": "MSVC for x64 (Release) for Xbox Series X|S", "inherits": [ "base", "x64", "Release", "MSVC", "Scarlett" ] },
-
-    { "name": "x64-Debug-XboxOne"    , "description": "MSVC for x64 (Debug) for Xbox One", "inherits": [ "base", "x64", "Debug", "MSVC", "XboxOne" ] },
-    { "name": "x64-Release-XboxOne"  , "description": "MSVC for x64 (Release) for Xbox One", "inherits": [ "base", "x64", "Release", "MSVC", "XboxOne" ] },
+    { "name": "x64-Debug-GDK"   , "description": "MSVC for x64 (Debug) with Microsoft GDK", "inherits": [ "base", "x64", "Debug", "MSVC", "GDK" ] },
+    { "name": "x64-Release-GDK" , "description": "MSVC for x64 (Release) with Microsoft GDK", "inherits": [ "base", "x64", "Release", "MSVC", "GDK" ] },
 
     { "name": "x64-Debug-Durango"    , "description": "MSVC for x64 (Debug) for legacy Xbox One XDK", "inherits": [ "base", "x64", "Debug", "MSVC", "Durango" ] },
     { "name": "x64-Release-Durango"  , "description": "MSVC for x64 (Release) for legacy Xbox One XDK", "inherits": [ "base", "x64", "Release", "MSVC", "Durango" ] },
 
-    { "name": "x64-Debug-VCPKG"      , "description": "MSVC for x64 (Debug) using VCPKG", "inherits": [ "base", "x64", "Debug", "MSVC", "VCPKG" ] },
-    { "name": "x64-Release-VCPKG"    , "description": "MSVC for x64 (Release) using VCPKG", "inherits": [ "base", "x64", "Release", "MSVC", "VCPKG" ] },
-    { "name": "x86-Debug-VCPKG"      , "description": "MSVC for x86 (Debug) using VCPKG", "inherits": [ "base", "x86", "Debug", "MSVC", "VCPKG" ] },
-    { "name": "x86-Release-VCPKG"    , "description": "MSVC for x86 (Release) using VCPKG", "inherits": [ "base", "x86", "Release", "MSVC", "VCPKG" ] },
-    { "name": "arm64-Debug-VCPKG"    , "description": "MSVC for ARM64 (Debug) using VCPKG", "inherits": [ "base", "ARM64", "Debug", "MSVC", "VCPKG" ] },
-    { "name": "arm64-Release-VCPKG"  , "description": "MSVC for ARM64 (Release) using VCPKG", "inherits": [ "base", "ARM64", "Release", "MSVC", "VCPKG" ] },
-    { "name": "arm64ec-Debug-VCPKG"  , "description": "MSVC for ARM64EC (Debug) using VCPKG", "inherits": [ "base", "ARM64EC", "Debug", "MSVC", "VCPKG" ], "cacheVariables": { "VCPKG_TARGET_TRIPLET": "arm64ec-windows" } },
-    { "name": "arm64ec-Release-VCPKG", "description": "MSVC for ARM64EC (Release) using VCPKG", "inherits": [ "base", "ARM64EC", "Release", "MSVC", "VCPKG" ], "cacheVariables": { "VCPKG_TARGET_TRIPLET": "arm64ec-windows" } },
+    { "name": "x64-Debug-VCPKG"    , "description": "MSVC for x64 (Debug) using VCPKG", "inherits": [ "base", "x64", "Debug", "MSVC", "VCPKG" ] },
+    { "name": "x64-Release-VCPKG"  , "description": "MSVC for x64 (Release) using VCPKG", "inherits": [ "base", "x64", "Release", "MSVC", "VCPKG" ] },
+    { "name": "x86-Debug-VCPKG"    , "description": "MSVC for x86 (Debug) using VCPKG", "inherits": [ "base", "x86", "Debug", "MSVC", "VCPKG" ] },
+    { "name": "x86-Release-VCPKG"  , "description": "MSVC for x86 (Release) using VCPKG", "inherits": [ "base", "x86", "Release", "MSVC", "VCPKG" ] },
 
-    { "name": "x64-Debug-EXR"      , "description": "MSVC for x64 (Debug) using VCPKG/OpenEXR", "inherits": [ "base", "x64", "Debug", "MSVC", "VCPKG", "EXR" ] },
-    { "name": "x64-Release-EXR"    , "description": "MSVC for x64 (Release) using VCPKG/OpenEXR", "inherits": [ "base", "x64", "Release", "MSVC", "VCPKG", "EXR" ] },
+    { "name": "arm64-Debug-VCPKG"    , "description": "MSVC for ARM64 (Debug) using VCPKG", "inherits": [ "base", "ARM64", "Debug", "MSVC", "VCPKG", "Win10" ] },
+    { "name": "arm64-Release-VCPKG"  , "description": "MSVC for ARM64 (Release) using VCPKG", "inherits": [ "base", "ARM64", "Release", "MSVC", "VCPKG", "Win10" ] },
+    { "name": "arm64ec-Debug-VCPKG"  , "description": "MSVC for ARM64EC (Debug) using VCPKG", "inherits": [ "base", "ARM64EC", "Debug", "MSVC", "VCPKG", "Win10" ], "cacheVariables": { "VCPKG_TARGET_TRIPLET": "arm64ec-windows" } },
+    { "name": "arm64ec-Release-VCPKG", "description": "MSVC for ARM64EC (Release) using VCPKG", "inherits": [ "base", "ARM64EC", "Release", "MSVC", "VCPKG", "Win10" ], "cacheVariables": { "VCPKG_TARGET_TRIPLET": "arm64ec-windows" } },
 
-    { "name": "x64-Debug-JPEG-PNG"  , "description": "MSVC for x64 (Debug) using VCPKG/PNG/JPEG", "inherits": [ "base", "x64", "Debug", "MSVC", "VCPKG", "JPEG_PNG" ] },
-    { "name": "x64-Release-JPEG-PNG", "description": "MSVC for x64 (Release) using VCPKG/PNG/JPEG", "inherits": [ "base", "x64", "Release", "MSVC", "VCPKG", "JPEG_PNG" ] },
+    { "name": "x64-Debug-Clang"    , "description": "Clang/LLVM for x64 (Debug) for Windows 8", "inherits": [ "base", "x64", "Debug", "Clang" ] },
+    { "name": "x64-Release-Clang"  , "description": "Clang/LLVM for x64 (Release) for Windows 8", "inherits": [ "base", "x64", "Release", "Clang" ] },
+    { "name": "x86-Debug-Clang"    , "description": "Clang/LLVM for x86 (Debug) for Windows 8", "inherits": [ "base", "x86", "Debug", "Clang", "Clang-X86" ] },
+    { "name": "x86-Release-Clang"  , "description": "Clang/LLVM for x86 (Release) for Windows 8", "inherits": [ "base", "x86", "Release", "Clang", "Clang-X86" ] },
 
-    { "name": "x64-Debug-Clang"    , "description": "Clang/LLVM for x64 (Debug) with DX12", "inherits": [ "base", "x64", "Debug", "Clang" ] },
-    { "name": "x64-Release-Clang"  , "description": "Clang/LLVM for x64 (Release) with DX12", "inherits": [ "base", "x64", "Release", "Clang" ] },
-    { "name": "x86-Debug-Clang"    , "description": "Clang/LLVM for x86 (Debug) with DX12", "inherits": [ "base", "x86", "Debug", "Clang", "Clang-X86" ] },
-    { "name": "x86-Release-Clang"  , "description": "Clang/LLVM for x86 (Release) with DX12", "inherits": [ "base", "x86", "Release", "Clang", "Clang-X86" ] },
-    { "name": "arm64-Debug-Clang"  , "description": "Clang/LLVM for AArch64 (Debug) with DX12", "inherits": [ "base", "ARM64", "Debug", "Clang", "Clang-AArch64" ] },
-    { "name": "arm64-Release-Clang", "description": "Clang/LLVM for AArch64 (Release) with DX12", "inherits": [ "base", "ARM64", "Release", "Clang", "Clang-AArch64" ] },
+    { "name": "x64-Debug-Win10-Clang"    , "description": "Clang/LLVM for x64 (Debug) for Windows 10", "inherits": [ "base", "x64", "Debug", "Clang", "Win10" ] },
+    { "name": "x64-Release-Win10-Clang"  , "description": "Clang/LLVM for x64 (Release) for Windows 10", "inherits": [ "base", "x64", "Release", "Clang", "Win10" ] },
+    { "name": "x86-Debug-Win10-Clang"    , "description": "Clang/LLVM for x86 (Debug) for Windows 10", "inherits": [ "base", "x86", "Debug", "Clang", "Clang-X86", "Win10" ] },
+    { "name": "x86-Release-Win10-Clang"  , "description": "Clang/LLVM for x86 (Release) for Windows 10", "inherits": [ "base", "x86", "Release", "Clang", "Clang-X86", "Win10" ] },
+
+    { "name": "arm64-Debug-Clang"   , "description": "Clang/LLVM for AArch64 (Debug) for Windows 10", "inherits": [ "base", "ARM64", "Debug", "Clang", "Clang-AArch64", "Win10" ] },
+    { "name": "arm64-Release-Clang" , "description": "Clang/LLVM for AArch64 (Release) for Windows 10", "inherits": [ "base", "ARM64", "Release", "Clang", "Clang-AArch64", "Win10" ] },
 
     { "name": "x64-Debug-UWP-Clang"    , "description": "Clang/LLVM for x64 (Debug) for UWP", "inherits": [ "base", "x64", "Debug", "Clang", "UWP" ] },
     { "name": "x64-Release-UWP-Clang"  , "description": "Clang/LLVM for x64 (Release) for UWP", "inherits": [ "base", "x64", "Release", "Clang", "UWP" ] },
@@ -337,74 +308,51 @@
     { "name": "arm64-Debug-UWP-Clang"  , "description": "Clang/LLVM for AArch64 (Debug) for UWP", "inherits": [ "base", "ARM64", "Debug", "Clang", "Clang-AArch64", "UWP" ] },
     { "name": "arm64-Release-UWP-Clang", "description": "Clang/LLVM for AArch64 (Release) for UWP", "inherits": [ "base", "ARM64", "Release", "Clang", "Clang-AArch64", "UWP" ] },
 
-    { "name": "x64-Debug-Win8-Clang"  , "description": "Clang/LLVM for x64 (Debug) for Windows 8.1", "inherits": [ "base", "x64", "Debug", "Clang", "Win8" ] },
-    { "name": "x64-Release-Win8-Clang", "description": "Clang/LLVM for x64 (Release) for Windows 8.1", "inherits": [ "base", "x64", "Release", "Clang", "Win8" ] },
-    { "name": "x86-Debug-Win8-Clang"  , "description": "Clang/LLVM for x86 (Debug) for Windows 8.1", "inherits": [ "base", "x86", "Debug", "Clang", "Clang-X86", "Win8" ] },
-    { "name": "x86-Release-Win8-Clang", "description": "Clang/LLVM for x86 (Release) for Windows 8.1", "inherits": [ "base", "x86", "Release", "Clang", "Clang-X86", "Win8" ] },
+    { "name": "x64-Debug-Redist-Clang"  , "description": "Clang/LLVM for x64 (Debug) with XAudio2Redist", "inherits": [ "base", "x64", "Debug", "Clang", "XAudio2Redist", "VCPKG" ] },
+    { "name": "x64-Release-Redist-Clang", "description": "Clang/LLVM for x64 (Release) with XAudio2Redist", "inherits": [ "base", "x64", "Release", "Clang", "XAudio2Redist", "VCPKG" ] },
+    { "name": "x86-Debug-Redist-Clang"  , "description": "Clang/LLVM for x86 (Debug) with XAudio2Redist", "inherits": [ "base", "x86", "Debug", "Clang", "Clang-X86", "XAudio2Redist", "VCPKG" ] },
+    { "name": "x86-Release-Redist-Clang", "description": "Clang/LLVM for x86 (Release) with XAudio2Redist", "inherits": [ "base", "x86", "Release", "Clang", "Clang-X86", "XAudio2Redist", "VCPKG" ] },
 
-    { "name": "x64-Debug-Clang-VCPKG"    , "description": "Clang/LLVM for x64 (Debug) using VCPKG/OpenEXR", "inherits": [ "base", "x64", "Debug", "Clang", "VCPKG" ] },
-    { "name": "x64-Release-Clang-VCPKG"  , "description": "Clang/LLVM for x64 (Release) using VCPKG/OpenEXR", "inherits": [ "base", "x64", "Release", "Clang", "VCPKG" ] },
-    { "name": "x86-Debug-Clang-VCPKG"    , "description": "Clang/LLVM for x86 (Debug) using VCPKG/OpenEXR", "inherits": [ "base", "x86", "Debug", "Clang", "Clang-X86", "VCPKG" ] },
-    { "name": "x86-Release-Clang-VCPKG"  , "description": "Clang/LLVM for x86 (Release) using VCPKG/OpenEXR", "inherits": [ "base", "x86", "Release", "Clang", "Clang-X86", "VCPKG" ] },
-    { "name": "arm64-Debug-Clang-VCPKG"  , "description": "Clang/LLVM for AArch64 (Debug) using VCPKG/OpenEXR", "inherits": [ "base", "ARM64", "Debug", "Clang", "Clang-AArch64", "VCPKG" ] },
-    { "name": "arm64-Release-Clang-VCPKG", "description": "Clang/LLVM for AArch64 (Release) using VCPKG/OpenEXR", "inherits": [ "base", "ARM64", "Release", "Clang", "Clang-AArch64", "VCPKG" ] },
+    { "name": "x64-Debug-Clang-VCPKG"     , "description": "Clang/LLVM for x64 (Debug) using VCPKG", "inherits": [ "base", "x64", "Debug", "Clang", "VCPKG" ] },
+    { "name": "x64-Release-Clang-VCPKG"   , "description": "Clang/LLVM for x64 (Release) using VCPKG", "inherits": [ "base", "x64", "Release", "Clang", "VCPKG" ] },
+    { "name": "x86-Debug-Clang-VCPKG"     , "description": "Clang/LLVM for x86 (Debug) using VCPKG", "inherits": [ "base", "x86", "Debug", "Clang", "Clang-X86", "VCPKG" ] },
+    { "name": "x86-Release-Clang-VCPKG"   , "description": "Clang/LLVM for x86 (Release) using VCPKG", "inherits": [ "base", "x86", "Release", "Clang", "Clang-X86", "VCPKG" ] },
 
-    { "name": "x64-Debug-Clang-JPEG-PNG"   , "description": "Clang/LLVM for x64 (Debug) with DX12", "inherits": [ "base", "x64", "Debug", "Clang", "VCPKG", "JPEG_PNG" ] },
-    { "name": "x64-Release-Clang-JPEG-PNG" , "description": "Clang/LLVM for x64 (Release) with DX12", "inherits": [ "base", "x64", "Release", "Clang", "VCPKG", "JPEG_PNG" ] },
+    { "name": "x64-Debug-GDK-Clang"   , "description": "Clang/LLVM for x64 (Debug) with Microsoft GDK", "inherits": [ "base", "x64", "Debug", "Clang", "GDK" ] },
+    { "name": "x64-Release-GDK-Clang" , "description": "Clang/LLVM for x64 (Release) with Microsoft GDK", "inherits": [ "base", "x64", "Release", "Clang", "GDK" ] },
 
-    { "name": "x64-Debug-GDKX"     , "description": "MSVC for x64 (Debug) Xbox One Extensions", "inherits": [ "base", "x64", "Debug", "GDKX", "MSVC" ] },
-    { "name": "x64-Release-GDKX"   , "description": "MSVC for x64 (Release) Xbox One Extensions", "inherits": [ "base", "x64", "Release", "GDKX", "MSVC" ] },
-    { "name": "x64-Debug-GDKX-S"   , "description": "MSVC for x64 (Debug) Xbox Series X|S Extensions", "inherits": [ "base", "x64", "Debug", "GDKXS", "MSVC" ] },
-    { "name": "x64-Release-GDKX-S" , "description": "MSVC for x64 (Release) Xbox Series X|S Extensions", "inherits": [ "base", "x64", "Release", "GDKXS", "MSVC" ] },
-    { "name": "x64-Debug-XDK"      , "description": "MSVC for x64 (Debug) Xbox One Extensions (legacy)", "inherits": [ "base", "x64", "Debug", "XDK", "MSVC" ] },
-    { "name": "x64-Release-XDK"    , "description": "MSVC for x64 (Release) Xbox One Extensions (legacy)", "inherits": [ "base", "x64", "Release", "XDK", "MSVC" ] },
+    { "name": "x64-Debug-MinGW"  , "description": "MinG-W64 (Debug)", "inherits": [ "base", "x64", "Debug", "GNUC", "VCPKG", "MinGW64", "XAudio2Redist" ] },
+    { "name": "x64-Release-MinGW", "description": "MinG-W64 (Release)", "inherits": [ "base", "x64", "Release", "GNUC", "VCPKG", "MinGW64", "XAudio2Redist" ] },
+    { "name": "x86-Debug-MinGW"  , "description": "MinG-W32 (Debug)", "inherits": [ "base", "x86", "Debug", "GNUC", "VCPKG", "MinGW32", "XAudio2Redist" ] },
+    { "name": "x86-Release-MinGW", "description": "MinG-W32 (Release)", "inherits": [ "base", "x86", "Release", "GNUC", "VCPKG", "MinGW32", "XAudio2Redist" ] },
 
-    { "name": "x64-Debug-GDKX-Clang"     , "description": "MSVC for x64 (Debug) Xbox One Extensions", "inherits": [ "base", "x64", "Debug", "GDKX", "Clang" ] },
-    { "name": "x64-Release-GDKX-Clang"   , "description": "MSVC for x64 (Release) Xbox One Extensions", "inherits": [ "base", "x64", "Release", "GDKX", "Clang" ] },
-    { "name": "x64-Debug-GDKX-S-Clang"   , "description": "MSVC for x64 (Debug) Xbox Series X|S Extensions", "inherits": [ "base", "x64", "Debug", "GDKXS", "Clang" ] },
-    { "name": "x64-Release-GDKX-S-Clang" , "description": "MSVC for x64 (Release) Xbox Series X|S Extensions", "inherits": [ "base", "x64", "Release", "GDKXS", "Clang" ] },
+    { "name": "x64-Debug-ICC"     , "description": "Intel Classic Compiler (Debug) for Windows 8", "inherits": [ "base", "x64", "Debug", "Intel" ] },
+    { "name": "x64-Release-ICC"   , "description": "Intel Classic Compiler (Release) for Windows 8", "inherits": [ "base", "x64", "Release", "Intel" ] },
 
-    { "name": "x64-Debug-Scarlett-Clang"  , "description": "Clang/LLVM for x64 (Debug) for Xbox Series X|S", "inherits": [ "base", "x64", "Debug", "Clang", "Scarlett" ] },
-    { "name": "x64-Release-Scarlett-Clang", "description": "Clang/LLVM for x64 (Release) for Xbox Series X|S", "inherits": [ "base", "x64", "Release", "Clang", "Scarlett" ] },
+    { "name": "x64-Debug-ICX"    , "description": "Intel oneAPI Compiler (Debug) for Windows 8", "inherits": [ "base", "x64", "Debug", "IntelLLVM" ] },
+    { "name": "x64-Release-ICX"  , "description": "Intel oneAPI Compiler (Release) for Windows 8", "inherits": [ "base", "x64", "Release", "IntelLLVM" ] },
 
-    { "name": "x64-Debug-XboxOne-Clang"   , "description": "Clang/LLVM for x64 (Debug) for Xbox One", "inherits": [ "base", "x64", "Debug", "Clang", "XboxOne" ] },
-    { "name": "x64-Release-XboxOne-Clang" , "description": "Clang/LLVM for x64 (Release) for Xbox One", "inherits": [ "base", "x64", "Release", "Clang", "XboxOne" ] },
-
-    { "name": "x64-Debug-MinGW"  , "description": "MinG-W64 (Debug)", "inherits": [ "base", "x64", "Debug", "GNUC", "VCPKG", "MinGW64" ] },
-    { "name": "x64-Release-MinGW", "description": "MinG-W64 (Release)", "inherits": [ "base", "x64", "Release", "GNUC", "VCPKG", "MinGW64" ] },
-    { "name": "x86-Debug-MinGW"  , "description": "MinG-W32 (Debug)", "inherits": [ "base", "x86", "Debug", "GNUC", "VCPKG", "MinGW32" ] },
-    { "name": "x86-Release-MinGW", "description": "MinG-W32 (Release)", "inherits": [ "base", "x86", "Release", "GNUC", "VCPKG", "MinGW32" ] },
-
-    { "name": "x64-Debug-MinGW-JPEG-PNG"  , "description": "MinG-W64 (Debug)", "inherits": [ "base", "x64", "Debug", "GNUC", "VCPKG", "MinGW64", "JPEG_PNG" ] },
-    { "name": "x64-Release-MinGW-JPEG-PNG", "description": "MinG-W64 (Release)", "inherits": [ "base", "x64", "Release", "GNUC", "VCPKG", "MinGW64", "JPEG_PNG" ] },
-    { "name": "x86-Debug-MinGW-JPEG-PNG"  , "description": "MinG-W32 (Debug)", "inherits": [ "base", "x86", "Debug", "GNUC", "VCPKG", "MinGW32", "JPEG_PNG" ] },
-    { "name": "x86-Release-MinGW-JPEG-PNG", "description": "MinG-W32 (Release)", "inherits": [ "base", "x86", "Release", "GNUC", "VCPKG", "MinGW32", "JPEG_PNG" ] },
-
-    { "name": "x64-Debug-Linux",     "description": "WSL Linux x64 (Debug)", "inherits": [ "base", "x64", "Debug", "VCPKG", "JPEG_PNG" ] },
-    { "name": "x64-Release-Linux",   "description": "WSL Linux x64 (Release)", "inherits": [ "base", "x64", "Release", "VCPKG", "JPEG_PNG" ] },
-    { "name": "arm64-Debug-Linux",   "description": "WSL Linux ARM64 (Debug)", "inherits": [ "base", "ARM64", "Debug", "VCPKG", "JPEG_PNG" ] },
-    { "name": "arm64-Release-Linux", "description": "WSL Linux ARM64 (Release)", "inherits": [ "base", "ARM64", "Release", "VCPKG", "JPEG_PNG" ] },
-
-    { "name": "x64-Debug-ICC"     , "description": "Intel Classic Compiler (Debug) with DX12", "inherits": [ "base", "x64", "Debug", "Intel" ] },
-    { "name": "x64-Release-ICC"   , "description": "Intel Classic Compiler (Release) with DX12", "inherits": [ "base", "x64", "Release", "Intel" ] },
-
-    { "name": "x64-Debug-ICX"    , "description": "Intel oneAPI Compiler (Debug) with DX12", "inherits": [ "base", "x64", "Debug", "IntelLLVM" ] },
-    { "name": "x64-Release-ICX"  , "description": "Intel oneAPI Compiler (Release) with DX12", "inherits": [ "base", "x64", "Release", "IntelLLVM" ] },
-
-    { "name": "x64-Analyze"       , "description": "MSVC for x64 (Debug) with DX12 using /analyze", "inherits": [ "base", "x64", "Debug", "MSVC", "Analyze" ] },
-    { "name": "x64-Coverage"      , "description": "MSVC for x64 (Debug) with DX12 w/ Code Coverage", "inherits": [ "base", "x64", "Debug", "MSVC", "Coverage" ] },
-    { "name": "x64-Coverage-Clang", "description": "Clang/LLVM for x64 (Debug) with DX12 w/ Code Coverage", "inherits": [ "base", "x64", "Debug", "Clang", "Coverage" ] },
-    { "name": "x64-Fuzzing"       , "description": "MSVC for x64 (Release) with ASan", "inherits": [ "base", "x64", "Release", "MSVC", "Fuzzing" ] }
+    { "name": "x64-Analyze"       , "description": "MSVC for x64 (Debug) for Windows 8 using /analyze", "inherits": [ "base", "x64", "Debug", "MSVC", "Analyze" ] },
+    { "name": "x64-Analyze-Win10" , "description": "MSVC for x64 (Debug) for Windows 10 using /analyze", "inherits": [ "base", "x64", "Debug", "MSVC", "Win10", "Analyze" ] },
+    { "name": "x64-Coverage"      , "description": "MSVC for x64 (Debug) w/ Code Coverage", "inherits": [ "base", "x64", "Debug", "MSVC", "Coverage" ] },
+    { "name": "x64-Coverage-Clang", "description": "Clang/LLVM for x64 (Debug) w/ Code Coverage", "inherits": [ "base", "x64", "Debug", "Clang", "Coverage" ] },
+    { "name": "x64-Fuzzing"       , "description": "MSVC for x64 (Release) with ASan", "inherits": [ "base", "x64", "Release", "MSVC", "Win10", "Fuzzing" ] }
   ],
   "testPresets": [
     { "name": "x64-Debug"      , "configurePreset": "x64-Debug" },
     { "name": "x64-Release"    , "configurePreset": "x64-Release" },
     { "name": "x86-Debug"      , "configurePreset": "x86-Debug" },
     { "name": "x86-Release"    , "configurePreset": "x86-Release" },
+
     { "name": "arm64-Debug"    , "configurePreset": "arm64-Debug" },
     { "name": "arm64-Release"  , "configurePreset": "arm64-Release" },
     { "name": "arm64ec-Debug"  , "configurePreset": "arm64ec-Debug" },
     { "name": "arm64ec-Release", "configurePreset": "arm64ec-Release" },
+
+    { "name": "x64-Debug-Redist"    , "configurePreset": "x64-Debug-Redist" },
+    { "name": "x64-Release-Redist"  , "configurePreset": "x64-Release-Redist" },
+    { "name": "x86-Debug-Redist"    , "configurePreset": "x86-Debug-Redist" },
+    { "name": "x86-Release-Redist"  , "configurePreset": "x86-Release-Redist" },
 
     { "name": "x64-Debug-Clang"    , "configurePreset": "x64-Debug-Clang" },
     { "name": "x64-Release-Clang"  , "configurePreset": "x64-Release-Clang" },
@@ -418,13 +366,10 @@
     { "name": "x86-Debug-MinGW"    , "configurePreset": "x86-Debug-MinGW" },
     { "name": "x86-Release-MinGW"  , "configurePreset": "x86-Release-MinGW" },
 
-    { "name": "x64-Debug-ICC"    , "configurePreset": "x64-Debug-ICC" },
-    { "name": "x64-Release-ICC"  , "configurePreset": "x64-Release-ICC"},
+    { "name": "x64-Debug-ICC"  , "configurePreset": "x64-Debug-ICC" },
+    { "name": "x64-Release-ICC", "configurePreset": "x64-Release-ICC" },
 
-    { "name": "x64-Debug-ICX"    , "configurePreset": "x64-Debug-ICX" },
-    { "name": "x64-Release-ICX"  , "configurePreset": "x64-Release-ICX"},
-
-    { "name": "x64-Debug-JPEG-PNG"  , "configurePreset": "x64-Debug-JPEG-PNG" },
-    { "name": "x64-Release-JPEG-PNG", "configurePreset": "x64-Release-JPEG-PNG"}
+    { "name": "x64-Debug-ICX"  , "configurePreset": "x64-Debug-ICX" },
+    { "name": "x64-Release-ICX", "configurePreset": "x64-Release-ICX" }
   ]
 }

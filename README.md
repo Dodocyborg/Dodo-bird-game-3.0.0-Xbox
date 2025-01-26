@@ -1,68 +1,62 @@
-![DirectX Logo](https://raw.githubusercontent.com/wiki/Microsoft/DirectXTex/X_jpg.jpg)
+![DirectX Logo](https://raw.githubusercontent.com/wiki/Microsoft/DirectXTK/X_jpg.jpg)
 
-# DirectXTex texture processing library
+# DirectX Tool Kit for DirectX 11
 
-http://go.microsoft.com/fwlink/?LinkId=248926
+http://go.microsoft.com/fwlink/?LinkId=248929
 
 Copyright (c) Microsoft Corporation.
 
 **October 28, 2024**
 
-This package contains DirectXTex, a shared source library for reading and writing ``.DDS`` files, and performing various texture content processing operations including resizing, format conversion, mip-map generation, block compression for Direct3D runtime texture resources, and height-map to normal-map conversion. This library makes use of the Windows Image Component (WIC) APIs. It also includes ``.TGA`` and ``.HDR`` readers and writers since these image file formats are commonly used for texture content processing pipelines, but are not currently supported by a built-in WIC codec.
+This package contains the "DirectX Tool Kit", a collection of helper classes for writing Direct3D 11 C++ code for Universal Windows Platform (UWP) apps for Windows 11, Windows 10, Xbox One, and Win32 desktop applications for Windows 7 Service Pack 1 or later.
 
-This code is designed to build with Visual Studio 2019 (16.11), Visual Studio 2022, clang for Windows v12 or later, or MinGW 12.2. Use of the Windows 10 May 2020 Update SDK ([19041](https://walbourn.github.io/windows-10-may-2020-update-sdk/)) or later is required for Visual Studio. It can also be built for Windows Subsystem for Linux using GCC 11 or later.
+This code is designed to build with Visual Studio 2019 (16.11), Visual Studio 2022, clang for Windows v12 or later, or MinGW 12.2. Use of the Windows 10 May 2020 Update SDK ([19041](https://walbourn.github.io/windows-10-may-2020-update-sdk/)) or later is required for Visual Studio.
 
 These components are designed to work without requiring any content from the legacy DirectX SDK. For details, see [Where is the DirectX SDK?](https://aka.ms/dxsdk).
 
 ## Directory Layout
 
-* ``DirectXTex\``
+* ``Inc\``
 
-  + This contains the DirectXTex library. This includes a full-featured DDS reader and writer including legacy format conversions, a TGA reader and writer, a HDR reader and writer, a WIC-based bitmap reader and writer (BMP, JPEG, PNG, TIFF, and HD Photo), and various texture processing functions. This is intended primarily for tool usage.
+  + Public Header Files (in the DirectX C++ namespace):
 
-> The majority of the header files here are intended for internal implementation of the library only (``BC.h``, ``BCDirectCompute.h``, ``DDS.h``, ``DirectXTexP.h``, etc.). Only ``DirectXTex.h`` and ``DirectXTex.inl`` are meant as the 'public' header for the library.
+    * Audio.h - low-level audio API using XAudio2 (DirectXTK for Audio public header)
+    * BufferHelpers.h - C++ helpers for creating D3D resources from CPU data
+    * CommonStates.h - factory providing commonly used D3D state objects
+    * DDSTextureLoader.h - light-weight DDS file texture loader
+    * DirectXHelpers.h - misc C++ helpers for D3D programming
+    * Effects.h - set of built-in shaders for common rendering tasks
+    * GamePad.h - gamepad controller helper using XInput, Windows.Gaming.Input, or GameInput
+    * GeometricPrimitive.h - draws basic shapes such as cubes and spheres
+    * GraphicsMemory.h - helper for managing dynamic graphics memory allocation
+    * Keyboard.h - keyboard state tracking helper
+    * Model.h - draws meshes loaded from .CMO, .SDKMESH, or .VBO files
+    * Mouse.h - mouse helper
+    * PostProcess.h - set of built-in shaders for common post-processing operations
+    * PrimitiveBatch.h - simple and efficient way to draw user primitives
+    * ScreenGrab.h - light-weight screen shot saver
+    * SimpleMath.h - simplified C++ wrapper for DirectXMath
+    * SpriteBatch.h - simple & efficient 2D sprite rendering
+    * SpriteFont.h - bitmap based text rendering
+    * VertexTypes.h - structures for commonly used vertex data formats
+    * WICTextureLoader.h - WIC-based image file texture loader
+    * XboxDDSTextureLoader.h - Xbox One exclusive apps variant of DDSTextureLoader
 
-* ``Auxiliary\``
+* ``Src\``
 
-  + Contains optional source files for the DirectXTex library, such as adapter loading functions using the OpenEXR library, Xbox texture tiling extensions, etc.
+  + DirectXTK source files and internal implementation headers
 
-* ``Common\``
+* ``Audio\``
 
-  + Contains shared source headers used by the DirectXTex library and tools.
+  + DirectXTK for Audio source files and internal implementation headers
 
-* ``Texconv\``
+* ``MakeSpriteFont\``
 
-  + This DirectXTex sample is an implementation of the [texconv](https://github.com/Microsoft/DirectXTex/wiki/Texconv) command-line texture utility from the DirectX SDK utilizing DirectXTex rather than D3DX.
+  + Command line tool used to generate binary resources for use with SpriteFont
 
-    It supports the same arguments as the *Texture Conversion Tool Extended* (``texconvex.exe``) legacy DirectX SDK utility. The primary differences are the ``-10`` and ``-11`` arguments are not applicable and the filter names (``POINT``, ``LINEAR``, ``CUBIC``, ``FANT`` or ``BOX``, ``TRIANGLE``, ``*_DITHER``, ``*_DITHER_DIFFUSION``). This also includes support for the JPEG XR (HD Photo) bitmap format.
+* ``XWBTool\``
 
-* ``Texassemble\``
-
-  + This DirectXTex sample is a [command-line utility](https://github.com/Microsoft/DirectXTex/wiki/Texassemble) for creating cubemaps, volume maps, or texture arrays from a set of individual input image files.
-
-* ``Texdiag\``
-
-  + This DirectXTex sample is a [command-line utility](https://github.com/Microsoft/DirectXTex/wiki/Texdiag) for analyzing image contents, primarily for debugging purposes.
-
-* ``DDSView\``
-
-  + This DirectXTex sample is a simple Direct3D 11-based viewer for DDS files. For array textures or volume maps, the "<" and ">" keyboard keys will show different images contained in the DDS. The "1" through "0" keys can also be used to jump to a specific image index.
-
-* ``DDSTextureLoader\``
-
-  + This contains a streamlined version of the legacy DirectX SDK sample *DDSWithoutD3DX11* texture loading code for a simple light-weight runtime DDS loader. There are versions for Direct3D 9, Direct3D 11, and Direct3D 12. This performs no runtime pixel data conversions. This is ideal for runtime usage, and supports the full complement of Direct3D texture  resources (1D, 2D, volume maps, cubemaps, mipmap levels, texture arrays, BC formats, etc.).
-
-* ``ScreenGrab\``
-
-  + This contains texture writing modules for Direct3D 9, Direct3D 11, and Direct3D 12 primarily intended for creating screenshots. The images are written as a DDS or as an image file format using WIC.
-
-* ``WICTextureLoader\``
-
-  + This contains a Direct3D 9, Direct3D 11 and Direct3D 12 2D texture loader that uses WIC to load a bitmap (BMP, JPEG, PNG, HD Photo, or other WIC supported file container), resize if needed based on the current feature level (or by explicit parameter), format convert to a DXGI_FORMAT if required, and then create a 2D texture. Note this does not support 1D textures, volume textures, cubemaps, or texture arrays. DDSTextureLoader is recommended for fully "precooked" textures for maximum performance and image quality, but this loader can be useful for creating simple 2D texture from standard image files at runtime.
-
-> DDSTextureLoader11, ScreenGrab11, and WICTextureLoader11 are 'stand-alone' versions of the same modules provided in the [DirectX Tool Kit for DX11](https://github.com/Microsoft/DirectXTK)
-
-> DDSTextureLoader12, ScreenGrab12, and WICTextureLoader12 are 'stand-alone' versions of the same modules provided in the [DirectX Tool Kit for DX12](https://github.com/Microsoft/DirectXTK12).
+  +  Command line tool for building XACT-style wave banks for use with DirectXTK for Audio's WaveBank class
 
 * ``build\``
 
@@ -70,31 +64,41 @@ These components are designed to work without requiring any content from the leg
 
 ## Documentation
 
-Documentation is available on the [GitHub wiki](https://github.com/Microsoft/DirectXTex/wiki).
+Documentation is available on the [GitHub wiki](https://github.com/Microsoft/DirectXTK/wiki).
 
 ## Notices
 
-All content and source code for this package are subject to the terms of the [MIT License](https://github.com/microsoft/DirectXTex/blob/main/LICENSE).
+All content and source code for this package are subject to the terms of the [MIT License](https://github.com/microsoft/DirectXTK/blob/main/LICENSE).
 
-For the latest version of DirectXTex, bug reports, etc. please visit the project site on [GitHub](https://github.com/microsoft/DirectXTex).
+For the latest version of DirectXTK, bug reports, etc. please visit the project site on [GitHub](https://github.com/microsoft/DirectXTK).
 
 ## Release Notes
 
-FOR SECURITY ADVISORIES, see [GitHub](https://github.com/microsoft/DirectXTex/security/advisories).
+FOR SECURITY ADVISORIES, see [GitHub](https://github.com/microsoft/DirectXTK/security/advisories).
 
-For a full change history, see [CHANGELOG.md](https://github.com/microsoft/DirectXTex/blob/main/CHANGELOG.md).
+For a full change history, see [CHANGELOG.md](https://github.com/microsoft/DirectXTK/blob/main/CHANGELOG.md).
 
-* Starting with the July 2022 release, the ``bool forceSRGB`` parameter for the CreateTextureEx and CreateShaderResourceViewEx functions is now a ``CREATETEX_FLAGS`` typed enum bitmask flag parameter. This may have a *breaking change* impact to client code. Replace ``true`` with ``CREATETEX_FORCE_SRGB`` and ``false`` with ``CREATETEX_DEFAULT``.
+* Starting with the December 2024 release, Windows 7 and Windows 8.0 support has been retired. For *DirectX ToolKit for Audio* this means that `DirectXTKAudio_Desktop_*_Win7` has been removed, and `DirectXTKAudio_Desktop_*_Win8` has been integrated into the `DirectXTK_Desktop_*` vcxproj which uses XAudio 2.8 for Windows 8.1 compatibility.
 
-* Starting with the June 2020 release, this library makes use of typed enum bitmask flags per the recommendation of the _C++ Standard_ section *17.5.2.1.3 Bitmask types*. This is consistent with Direct3D 12's use of the ``DEFINE_ENUM_FLAG_OPERATORS`` macro. This may have *breaking change* impacts to client code:
+  * Remove any References to or use of `DirectXTKAudio_Desktop_*_Win8.vcxproj` or `DirectXTKAudio_Desktop_*_Win7`. If using `DirectXTK_Desktop_*.vcxproj` you will be using XAudio 2.8 as before. Client code will need to build with `_WIN32_WINNT=0x0603`.
 
-  * You cannot pass the ``0`` literal as your flags value. Instead you must make use of the appropriate default enum value: ``CP_FLAGS_NONE``, ``DDS_FLAGS_NONE``, ``WIC_FLAGS_NONE``, ``TEX_FR_ROTATE0``, ``TEX_FILTER_DEFAULT``, ``TEX_FILTER_DEFAULT``, ``TEX_FILTER_DEFAULT``, ``CNMAP_DEFAULT``, or ``CNMAP_DEFAULT``.
+  * With the `directxtk_desktop_2019` NuGet package, you will be using XAudio 2.8 and no longer use the XAudio2Redist NuGet package. Client code will build with `_WIN32_WINNT=0x0603`.
 
-  * Use the enum type instead of ``DWORD`` if building up flags values locally with bitmask operations. For example, ```DDS_FLAGS flags = DDS_FLAGS_NONE; if (...) flags |= DDS_FLAGS_EXPAND_LUMINANCE;```
+  * If you want to use XAudio2Redist with Windows 8.1, the CMake project supports this with the build option `BUILD_XAUDIO_REDIST`. The CMake build option `BUILD_XAUDIO_WIN7` was renamed.
 
-  * In cases where some of the flags overlap, you can use the ``|`` to combine the relevant types: ``TEX_FILTER_FLAGS`` filter modes combine with ``WIC_FLAGS``, ``TEX_FILTER_FLAGS`` sRGB flags combine with ``TEX_PMALPHA_FLAGS`` or ``TEX_COMPRESS_FLAGS``. No other bitwise operators are defined. For example, ```WIC_FLAGS wicFlags = WIC_FLAGS_NONE | TEX_FILTER_CUBIC;```
+* Starting with the February 2023 release, the Mouse class implementation of relative mouse movement was updated to accumulate changes between calls to ``GetState``. By default, each time you call ``GetState`` the deltas are reset which works for scenarios where you use relative movement but only call the method once per frame. If you call it more than once per frame, then add an explicit call to ``EndOfInputFrame`` to use an explicit reset model instead.
 
-* WICTextureLoader cannot load ``.TGA`` or ``.HDR`` files unless the system has a 3rd party WIC codec installed. You must use the DirectXTex library for TGA/HDR file format support without relying on an add-on WIC codec.
+* As of the September 2022 release, the library makes use of C++11 inline namespaces for differing types that have the same names in the DirectX 11 and DirectX 12 version of the *DirectX Tool Kit*. This provides a link-unique name such as ``DirectX::DX11::SpriteBatch`` that will appear in linker output messages. In most use cases, however, there is no need to add explicit ``DX11`` namespace resolution in client code.
+
+* Starting with the July 2022 release, the ``bool forceSRGB`` parameter for DDSTextureLoader ``Ex`` functions is now a ``DDS_LOADER_FLAGS`` typed enum bitmask flag parameter. This may have a *breaking change* impact to client code. Replace ``true`` with ``DDS_LOADER_FORCE_SRGB`` and ``false`` with ``DDS_LOADER_DEFAULT``.
+
+* As of the October 2021 release, the DGSLEffect no longer directly supports skinning. Instead, make use of **SkinnedDGSLEffect** which is derived from DGSLEffect.
+
+* Starting with the June 2020 release, this library makes use of [typed enum bitmask flags](https://walbourn.github.io/modern-c++-bitmask-types/) per the recommendation of the _C++ Standard_ section *17.5.2.1.3 Bitmask types*. This may have *breaking change* impacts to client code:
+
+  * You cannot pass the ``0`` literal as your flags value. Instead you must make use of the appropriate default enum value: ``AudioEngine_Default``, ``SoundEffectInstance_Default``, ``ModelLoader_Clockwise``, or ``WIC_LOADER_DEFAULT``.
+
+  * Use the enum type instead of ``DWORD`` if building up flags values locally with bitmask operations. For example, ```WIC_LOADER_FLAGS flags = WIC_LOADER_DEFAULT; if (...) flags |= WIC_LOADER_FORCE_SRGB;```
 
 * The UWP projects and the Win10 classic desktop project include configurations for the ARM64 platform. Building these requires installing the ARM64 toolset.
 
@@ -104,32 +108,15 @@ For a full change history, see [CHANGELOG.md](https://github.com/microsoft/Direc
 
 * The ``CompileShaders.cmd`` script must have Windows-style (CRLF) line-endings. If it is changed to Linux-style (LF) line-endings, it can fail to build all the required shaders.
 
-* As of the October 2024 release, the command-line tools also support GNU-style long options using ``--``. All existing switches continue to function, but some of the `-` options are now deprecated per this table:
+* Xbox One support for DirectX 11 requires the legacy Xbox One XDK. See February 2023 or earlier releases of *DirectX Tool Kit* for the required project files.
 
-|texassemble||texconv||texdiag||
-|---|---|---|---|---|---|
-|-tonemap|--tonemap|-badtails|--bad-tails|-badtails|--bad-tails|
-|-bgcolor|--gif-bg-color|-fixbc4x4|--fix-bc-4x4|-ignoremips|--ignore-mips|
-|-swizzle|--swizzle|-ignoremips|--ignore-mips|-permissive|--permissive|
-|-stripmips|--strip-mips|-inverty|--invert-y|-targetx|--target-x||-targety|--target-y|
-|||-keepcoverage|--keep-coverage|||
-|||-permissive|--permissive|||
-|||-reconstructz|--reconstruct-z|||
-|||-rotatecolor|--rotate-color|||
-|||-singleproc|--single-proc|||
-|||-swizzle|--swizzle|||
-|||-tgazeroalpha|--tga-zero-alpha|||
-|||-timing|--timing|||
-|||-tonemap|--tonemap|||
-|||-wiclossless|--wic-lossless|||
-|||-wicmulti|--wic-multiframe|||
-|||-x2bias|--x2-bias|||
+* As of the October 2024 release, the xwbtool command-line tool also supports GNU-style long options using ``--``. All existing switches continue to function. MakeSpriteFont supports only `--version` and ``--help`` for POSIX-style parameters.
 
 ## Support
 
-For questions, consider using [Stack Overflow](https://stackoverflow.com/questions/tagged/directxtk) with the *directxtk* tag, or the [DirectX Discord Server](https://discord.gg/directx) in the *dx12-developers* or *dx9-dx11-developers* channel.
+For questions, consider using [Stack Overflow](https://stackoverflow.com/questions/tagged/directxtk) with the *directxtk* tag, or the [DirectX Discord Server](https://discord.gg/directx) in the *dx9-dx11-developers* channel.
 
-For bug reports and feature requests, please use GitHub [issues](https://github.com/microsoft/DirectXTex/issues) for this project.
+For bug reports and feature requests, please use GitHub [issues](https://github.com/microsoft/DirectXTK/issues) for this project.
 
 ## Contributing
 
@@ -137,7 +124,7 @@ This project welcomes contributions and suggestions. Most contributions require 
 
 When you submit a pull request, a CLA bot will automatically determine whether you need to provide a CLA and decorate the PR appropriately (e.g., status check, comment). Simply follow the instructions provided by the bot. You will only need to do this once across all repos using our CLA.
 
-Tests for new features should also be submitted as a PR to the [Test Suite](https://github.com/walbourn/directxtextest/wiki) repository.
+Tests for new features should also be submitted as a PR to the [Test Suite](https://github.com/walbourn/directxtktest/wiki) repository.
 
 ## Code of Conduct
 
@@ -149,10 +136,16 @@ This project may contain trademarks or logos for projects, products, or services
 
 ## Credits
 
-The DirectXTex library is the work of Chuck Walbourn, with contributions from Matt Lee, Xin Huang, Craig Peeper, and the numerous other Microsoft engineers who developed the D3DX utility library over the years.
+The _DirectX Tool Kit_ is the work of Shawn Hargreaves and Chuck Walbourn, with contributions from Aaron Rodriguez Hernandez and Dani Roman.
 
-Thanks to Paul Penson for his help with the implementation of ``MemoryStreamOnBlob``.
+Thanks to Shanon Drone for the SDKMESH file format.
+
+Thanks to Adrian Tsai for the geodesic sphere implementation.
+
+Thanks to Garrett Serack for his help in creating the NuGet packages for DirectX Tool Kit.
+
+Thanks to Roberto Sonnino for his help with the ``CMO``, DGSL rendering, and the VS Starter Kit animation.
+
+Thanks to Pete Lewis and Justin Saunders for the normal-mapped and PBR shaders implementation.
 
 Thanks to Andrew Farrier and Scott Matloff for their on-going help with code reviews.
-
-Thanks to Park DongHa for their contribution of the JPEG/PNG auxiliary functions.

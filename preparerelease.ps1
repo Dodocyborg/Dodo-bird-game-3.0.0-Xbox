@@ -20,7 +20,7 @@ This is the name of the newly created branch for the release PR. Defaults to '<D
 This is a $true or $false value that indicates if the library version number should be incremented. Defaults to $true.
 
 .LINK
-https://github.com/microsoft/DirectXMath/wiki
+https://github.com/microsoft/DirectXTK/wiki
 
 #>
 
@@ -32,11 +32,10 @@ param(
 
 $reporoot = Split-Path -Path $PSScriptRoot -Parent
 $cmake = $reporoot + "\CMakeLists.txt"
-$header = $reporoot + "\Inc\DirectXMath.h"
 $readme = $reporoot + "\README.md"
 $history = $reporoot + "\CHANGELOG.md"
 
-if ((-Not (Test-Path $cmake)) -Or (-Not (Test-Path $header)) -Or (-Not (Test-Path $readme)) -Or (-Not (Test-Path $history))) {
+if ((-Not (Test-Path $cmake)) -Or (-Not (Test-Path $readme)) -Or (-Not (Test-Path $history))) {
     Write-Error "ERROR: Unexpected location of script file!" -ErrorAction Stop
 }
 
@@ -50,14 +49,14 @@ if ($LastExitCode -ne 0) {
     Write-Error "ERROR: Failed to sync branch!" -ErrorAction Stop
 }
 
-$version = Get-Content ($cmake) | Select-String -Pattern "set\(DIRECTXMATH_VERSION" -CaseSensitive
-if (-Not ($version -match "([0-9]?\.[0-9]+)")) {
+$version = Get-Content ($cmake) | Select-String -Pattern "set\(DIRECTXTK_VERSION" -CaseSensitive
+if (-Not ($version -match "([0-9]?\.[0-9]?\.[0-9]?)")) {
     Write-Error "ERROR: Failed to current version!" -ErrorAction Stop
 }
 $version = $Matches.0
 $rawversion = $version.replace('.','')
 
-$newreleasedate = Get-Date -Format "MMMM yyyy"
+$newreleasedate = Get-Date -Format "MMMM d, yyyy"
 $newreleasetag = (Get-Date -Format "MMMyyyy").ToLower()
 
 if($UpdateVersion) {
@@ -67,9 +66,9 @@ else {
     $newrawversion = $rawversion
 }
 
-$newversion = $newrawversion[0] + "." + $newrawversion[1] + $newrawversion[2]
+$newversion = $newrawversion[0] + "." + $newrawversion[1] + "." + $newrawversion[2]
 
-$rawreleasedate = $(Get-Content $readme) | Select-String -Pattern "\*\*[A-Z][a-z]+\S.?\S.\d\d\d\d\*\*"
+$rawreleasedate = $(Get-Content $readme) | Select-String -Pattern "\*\*[A-Z][a-z]+\S.\d+,?\S.\d\d\d\d\*\*"
 if ([string]::IsNullOrEmpty($rawreleasedate)) {
     Write-Error "ERROR: Failed to current release date!" -ErrorAction Stop
 }
@@ -98,8 +97,7 @@ Write-Host "     Release Tag: " $newreleasetag
 Write-Host " Release Version: " $newversion
 
 if($UpdateVersion) {
-    (Get-Content $cmake).Replace("set(DIRECTXMATH_VERSION $version)","set(DIRECTXMATH_VERSION $newversion)") | Set-Content $cmake
-    (Get-Content $header).Replace("#define DIRECTX_MATH_VERSION $rawversion","#define DIRECTX_MATH_VERSION $newrawversion") | Set-Content $header
+    (Get-Content $cmake).Replace("set(DIRECTXTK_VERSION $version)","set(DIRECTXTK_VERSION $newversion)") | Set-Content $cmake
 }
 
 (Get-Content $readme).Replace("$rawreleasedate", "**$newreleasedate**") | Set-Content $readme
