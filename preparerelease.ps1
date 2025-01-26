@@ -20,7 +20,7 @@ This is the name of the newly created branch for the release PR. Defaults to '<D
 This is a $true or $false value that indicates if the library version number should be incremented. Defaults to $true.
 
 .LINK
-https://github.com/microsoft/DirectXTK/wiki
+https://github.com/microsoft/DirectXTK12/wiki
 
 #>
 
@@ -49,7 +49,7 @@ if ($LastExitCode -ne 0) {
     Write-Error "ERROR: Failed to sync branch!" -ErrorAction Stop
 }
 
-$version = Get-Content ($cmake) | Select-String -Pattern "set\(DIRECTXTK_VERSION" -CaseSensitive
+$version = Get-Content ($cmake) | Select-String -Pattern "set\(DIRECTXTK12_VERSION" -CaseSensitive
 if (-Not ($version -match "([0-9]?\.[0-9]?\.[0-9]?)")) {
     Write-Error "ERROR: Failed to current version!" -ErrorAction Stop
 }
@@ -97,7 +97,7 @@ Write-Host "     Release Tag: " $newreleasetag
 Write-Host " Release Version: " $newversion
 
 if($UpdateVersion) {
-    (Get-Content $cmake).Replace("set(DIRECTXTK_VERSION $version)","set(DIRECTXTK_VERSION $newversion)") | Set-Content $cmake
+    (Get-Content $cmake).Replace("set(DIRECTXTK12_VERSION $version)","set(DIRECTXTK12_VERSION $newversion)") | Set-Content $cmake
 }
 
 (Get-Content $readme).Replace("$rawreleasedate", "**$newreleasedate**") | Set-Content $readme

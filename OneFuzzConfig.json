@@ -16,7 +16,7 @@
       "OneFuzzJobs": [
         {
           "ProjectName": "Direct3D",
-          "TargetName": "DirectXTK",
+          "TargetName": "DirectXTK12",
           "TargetOptions": [
              " -rss_limit_mb=4096"
           ],
@@ -41,8 +41,8 @@
       },
       "CodeCoverage": {
         "Org": "mscodehub",
-        "Project": "DirectXTK",
-        "PipelineId": "3033"
+        "Project": "DirectXTK12",
+        "PipelineId": "3049"
       }
     }
   ]
