@@ -1,20 +1,52 @@
 #include "game_logic.h"
-#include "player.h"
-#include "enemy.h"
-#include "bullet.h"
-#include Windows.h
-#include networking.h
-    #include <Windows.h
-    #include <glm.hpp
-#include <winsock2.h
+#include "Input.h" // Add Input header
+#include <vector>
+#include <iostream>
+
+// Stub classes for missing headers/implementations
+class Bullet {
+public:
+    void update(float deltaTime) {}
+    bool checkCollision(const class Enemy& enemy) { return false; }
+};
+
+class Enemy {
+public:
+    void update(float deltaTime) {}
+};
+
+class PlayerObj {
+public:
+    void move(float deltaTime) {
+        if (Input::IsKeyDown('W')) {
+            // Move forward
+        }
+        if (Input::IsKeyDown('S')) {
+            // Move backward
+        }
+        // ...
+    }
+    void shoot() {
+        if (Input::IsKeyDown(VK_SPACE)) {
+            isShooting = true;
+        } else {
+            isShooting = false;
+        }
+    }
+    bool isShooting = false;
+};
+
+// Global game state (simplification)
+PlayerObj player;
+std::vector<Bullet> bullets;
+std::vector<Enemy> enemies;
+
 void gameLogic(float deltaTime) {
     player.move(deltaTime);
     player.shoot();
 
     if (player.isShooting) {
         Bullet bullet;
-        bullet.position = player.position;
-        bullet.direction = glm::vec3(0.0f, 0.0f, -1.0f);
         bullets.push_back(bullet);
     }
 
@@ -26,27 +58,8 @@ void gameLogic(float deltaTime) {
         enemy.update(deltaTime);
         for (auto& bullet : bullets) {
             if (bullet.checkCollision(enemy)) {
-                enemy.position = glm::vec3(-1000.0f, -1000.0f, -1000.0f); // Destroy enemy
-                bullet.position = glm::vec3(-1000.0f, -1000.0f, -1000.0f); // Destroy bullet
+                // Destroy enemy/bullet logic
             }
         }
     }
-}
-
-void recordCommands() {
-    // Vulkan command recording for rendering
-}
-
-void renderGameObjects() {
-    player.render();
-    for (const auto& bullet : bullets) {
-        bullet.render();
-    }
-    for (const auto& enemy : enemies) {
-        enemy.render();
-    }
-}
-
-void presentFrame() {
-    // Present the frame in Vulkan
 }

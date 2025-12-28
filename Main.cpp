@@ -1,5 +1,5 @@
 #include <iostream>
-#include "DirectXInuit.h"Windows.h"
+#include <windows.h>
 #include <d3d11.h>
 #include "game_init.h"
 #include "game_logic.h"
@@ -10,9 +10,8 @@
 #include "Matchmaking.h"
 #include "Leaderboards.h"
 #include "Networking.h"
-#include "utils.h 
-    #include #utils.cpp
-    
+#include "utils.h"
+
 // DirectX Headers
 #pragma comment(lib, "d3d11.lib")
 #pragma comment(lib, "dxgi.lib")
@@ -73,7 +72,9 @@ int main() {
     initializeGame();
 
     // Initialize DirectX (assuming you have a valid HWND for your window)
-    HWND hwnd = GetConsoleWindow();  // Replace with actual HWND from your windowing system
+    // Note: GetConsoleWindow() returns the console window handle.
+    // For a real game, you should create a proper window using CreateWindowEx.
+    HWND hwnd = GetConsoleWindow();
     initializeDirectX(hwnd);
 
     // Initialize Procedural Terrain
@@ -97,7 +98,13 @@ int main() {
         float deltaTime = 0.016f;  // Assuming 60 FPS for simplicity
 
         // Handle Input
-        glfwPollEvents();  // Replace with DirectX input handling (e.g., Win32 messages or raw input)
+        // Replace with proper Win32 message loop or XInput
+        MSG msg;
+        while (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
+            TranslateMessage(&msg);
+            DispatchMessage(&msg);
+            if (msg.message == WM_QUIT) isRunning = false;
+        }
 
         // Update Game Logic (Player, Enemies, Bullets)
         gameLogic(deltaTime);
@@ -112,7 +119,7 @@ int main() {
         network.syncState();
 
         // Example Quit Condition
-        if (false) {  // Replace with actual exit condition
+        if (GetAsyncKeyState(VK_ESCAPE)) {
             isRunning = false;
         }
     }
