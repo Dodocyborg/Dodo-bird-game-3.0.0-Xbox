@@ -1,4 +1,6 @@
 #include "src_PaymentSystem.h"
+#include "src_PlatinumAtWork.h"
+#include "src_PasswordBank.h"
 #include <cstdlib>
 #include <ctime>
 #include <sstream>
@@ -13,11 +15,27 @@ bool PaymentSystem::processPayment(const std::string& user, double amount, Payme
         return false;
     }
 
+    // 5.0.0 Update: Use Platinum At Work for Credit/Debit
+    if (method == PaymentMethod::CREDIT_CARD || method == PaymentMethod::DEBIT_CARD) {
+        // 'details' is assumed to be "CardNumber|CVV" for simulation
+        // In real app, this data comes from a secure form
+        std::string cardNum = details.substr(0, 16);
+        std::string cvv = "123"; // Mock extraction
+
+        // 1. Tokenize via PasswordBank
+        std::string token = PasswordBank::TokenizeCard(cardNum, cvv);
+
+        // 2. Process via PlatinumAtWork
+        if (PlatinumAtWork::ProcessTransaction(token, amount, "USD", "In-Game Purchase")) {
+             return true;
+        } else {
+             std::cout << "[Payment] Transaction Declined by Bank.\n";
+             return false;
+        }
+    }
+
     switch (method) {
-        case PaymentMethod::CREDIT_CARD:
-        case PaymentMethod::DEBIT_CARD:
-            std::cout << "[Payment] Verifying card network (Visa/Mastercard/Amex)...\n";
-            break;
+        // Platinum At Work handles cards now (above)
         case PaymentMethod::ACH:
             std::cout << "[Payment] Verifying routing number for direct bank transfer...\n";
             break;

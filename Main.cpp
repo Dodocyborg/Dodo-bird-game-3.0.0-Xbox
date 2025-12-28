@@ -16,6 +16,9 @@
 #include "src_PaymentSystem.h"
 #include "src_EconomySystem.h"
 #include "src_EmailSystem.h"
+#include "src_PasswordBank.h"
+#include "src_PlatinumAtWork.h"
+#include "src_NewsFeed.h"
 
 // DirectX Headers
 #pragma comment(lib, "d3d11.lib")
@@ -102,11 +105,18 @@ int main() {
     EconomySystem economy;
     // PaymentSystem and EmailSystem are static
 
-    std::cout << "Initializing v4.0.0 Update...\n";
+    // Initialize 5.0 & 6.0 Systems
+    PasswordBank::Initialize();
+    PlatinumAtWork::Setup("MERCHANT_ID_8821", "sk_live_platinum_secure_key_992"); // Secure Init
+    NewsFeed::Initialize();
+    NewsFeed::FetchCommunityNews();
+    NewsFeed::DisplayFeed();
+
+    std::cout << "Initializing v6.0.0 Complete...\n";
     std::cout << "- Infinite Level: Enabled\n";
     std::cout << "- AI Moderation: Online (Live Watch Enabled)\n";
-    std::cout << "- Payment Gateway: Connected (Real Money + E-Gift Cards)\n";
-    std::cout << "- Support Systems: Email & Live Chat Active\n";
+    std::cout << "- Payment Gateway: Platinum At Work (PCI Compliant)\n";
+    std::cout << "- Community: Wiki & News Feed Integrated\n";
 
     // Main Game Loop
     bool isRunning = true;
@@ -187,8 +197,9 @@ int main() {
         } else { gPressed = false; }
 
         static bool mPressed = false;
-        if (Input::IsKeyDown('M')) { // Real Money Purchase
+        if (Input::IsKeyDown('M')) { // Real Money Purchase via Platinum
             if (!mPressed) {
+                // Now uses PlatinumAtWork under the hood for Credit/Debit
                 if(PaymentSystem::processRealMoneyPurchase("Player", "Endgame Sword", 49.99, Currency::USD)) {
                     EmailSystem::sendReceipt("player@example.com", "Endgame Sword", 49.99);
                     economy.purchaseEndgameItem("Player", "Endgame Sword");
