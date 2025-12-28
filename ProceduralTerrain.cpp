@@ -1,5 +1,6 @@
-{#include "ProceduralTerrain.h"
+#include "ProceduralTerrain.h"
 #include <cmath>
+#include <iostream>
 
 // Perlin Noise Function (3D)
 float ProceduralTerrain::perlinNoise3D(float x, float y, float z) {

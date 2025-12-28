@@ -41,10 +41,24 @@ void UltraProceduralWorld::ultraProceduralRegenerate() {
 }
 
 void UltraProceduralWorld::updateVisibleChunks(const float* playerPos) {
+    // Infinite Level Logic: Automatically load chunks around player forever
+    int renderDistance = 6; // Increased for 4.0 update
     int px = static_cast<int>(std::floor(playerPos[0] / 16.0f));
     int pz = static_cast<int>(std::floor(playerPos[2] / 16.0f));
-    for (int dx = -3; dx <= 3; ++dx) {
-        for (int dz = -3; dz <= 3; ++dz) {
+
+    // Unload far chunks to save memory
+    auto it = loadedChunks.begin();
+    while (it != loadedChunks.end()) {
+        const Chunk& c = it->second;
+        if (std::abs(c.x - px) > renderDistance + 2 || std::abs(c.z - pz) > renderDistance + 2) {
+            it = loadedChunks.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
+    for (int dx = -renderDistance; dx <= renderDistance; ++dx) {
+        for (int dz = -renderDistance; dz <= renderDistance; ++dz) {
             int cx = px + dx, cz = pz + dz;
             std::ostringstream key; key << cx << "," << cz;
             if (loadedChunks.find(key.str()) == loadedChunks.end())
