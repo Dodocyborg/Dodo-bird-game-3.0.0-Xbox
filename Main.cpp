@@ -11,6 +11,11 @@
 #include "Leaderboards.h"
 #include "Networking.h"
 #include "utils.h"
+#include "Input.h"
+#include "src_ModerationSystem.h"
+#include "src_PaymentSystem.h"
+#include "src_EconomySystem.h"
+#include "src_EmailSystem.h"
 
 // DirectX Headers
 #pragma comment(lib, "d3d11.lib")
@@ -92,6 +97,17 @@ int main() {
     // Initialize Leaderboards
     Leaderboards leaderboards;
 
+    // Initialize 4.0 Systems
+    ModerationSystem moderation;
+    EconomySystem economy;
+    // PaymentSystem and EmailSystem are static
+
+    std::cout << "Initializing v4.0.0 Update...\n";
+    std::cout << "- Infinite Level: Enabled\n";
+    std::cout << "- AI Moderation: Online (Live Watch Enabled)\n";
+    std::cout << "- Payment Gateway: Connected (Real Money + E-Gift Cards)\n";
+    std::cout << "- Support Systems: Email & Live Chat Active\n";
+
     // Main Game Loop
     bool isRunning = true;
     while (isRunning) {
@@ -117,6 +133,69 @@ int main() {
 
         // Handle Networking
         network.syncState();
+
+        // Handle 4.0 Features (Mock Input with simple cooldown/debounce)
+        static bool hPressed = false;
+        if (Input::IsKeyDown('H')) {
+            if (!hPressed) {
+                moderation.processChatMessage("Player", "help");
+                hPressed = true;
+            }
+        } else { hPressed = false; }
+
+        static bool pPressed = false;
+        if (Input::IsKeyDown('P')) {
+            if (!pPressed) {
+                PaymentSystem::processPayment("Player", 10.00, PaymentMethod::CREDIT_CARD, "4111...");
+                economy.addCredits("Player", 1000);
+                pPressed = true;
+            }
+        } else { pPressed = false; }
+
+        static bool bPressed = false;
+        if (Input::IsKeyDown('B')) {
+             if (!bPressed) {
+                 economy.purchaseIvyJersey("Player");
+                 bPressed = true;
+             }
+        } else { bPressed = false; }
+
+        static bool rPressed = false;
+        if (Input::IsKeyDown('R')) {
+             if (!rPressed) {
+                 moderation.submitReport("Player", "BadGuy123", "Being mean");
+                 rPressed = true;
+             }
+        } else { rPressed = false; }
+
+        // New Inputs for Updated Features
+        static bool ePressed = false;
+        if (Input::IsKeyDown('E')) { // Email Support
+            if (!ePressed) {
+                EmailSystem::sendSupportEmail("player@example.com", "I lost my item!");
+                ePressed = true;
+            }
+        } else { ePressed = false; }
+
+        static bool gPressed = false;
+        if (Input::IsKeyDown('G')) { // Generate E-Gift Card
+            if (!gPressed) {
+                std::string code = PaymentSystem::generateEGiftCard(50.0, Currency::USD);
+                PaymentSystem::emailGiftCard("friend@example.com", code);
+                gPressed = true;
+            }
+        } else { gPressed = false; }
+
+        static bool mPressed = false;
+        if (Input::IsKeyDown('M')) { // Real Money Purchase
+            if (!mPressed) {
+                if(PaymentSystem::processRealMoneyPurchase("Player", "Endgame Sword", 49.99, Currency::USD)) {
+                    EmailSystem::sendReceipt("player@example.com", "Endgame Sword", 49.99);
+                    economy.purchaseEndgameItem("Player", "Endgame Sword");
+                }
+                mPressed = true;
+            }
+        } else { mPressed = false; }
 
         // Example Quit Condition
         if (GetAsyncKeyState(VK_ESCAPE)) {
