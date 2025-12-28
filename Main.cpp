@@ -19,6 +19,7 @@
 #include "src_PasswordBank.h"
 #include "src_PlatinumAtWork.h"
 #include "src_NewsFeed.h"
+#include "src_BillingUI.h"
 
 // DirectX Headers
 #pragma comment(lib, "d3d11.lib")
@@ -199,10 +200,17 @@ int main() {
         static bool mPressed = false;
         if (Input::IsKeyDown('M')) { // Real Money Purchase via Platinum
             if (!mPressed) {
-                // Now uses PlatinumAtWork under the hood for Credit/Debit
-                if(PaymentSystem::processRealMoneyPurchase("Player", "Endgame Sword", 49.99, Currency::USD)) {
-                    EmailSystem::sendReceipt("player@example.com", "Endgame Sword", 49.99);
-                    economy.purchaseEndgameItem("Player", "Endgame Sword");
+                // Trigger the Billing UI to ask user for card details
+                PaymentDetails details = BillingUI::ShowCheckoutForm("Endgame Sword", 49.99);
+
+                if (!details.cancelled) {
+                    // Pass the user-entered details to the backend
+                    if(PaymentSystem::processRealMoneyPurchase("Player", "Endgame Sword", 49.99, Currency::USD, details.cardNumber, details.cvv)) {
+                        EmailSystem::sendReceipt("player@example.com", "Endgame Sword", 49.99);
+                        economy.purchaseEndgameItem("Player", "Endgame Sword");
+                    }
+                } else {
+                    std::cout << "[Store] Purchase Cancelled.\n";
                 }
                 mPressed = true;
             }

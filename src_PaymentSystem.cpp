@@ -78,7 +78,7 @@ void PaymentSystem::emailGiftCard(const std::string& email, const std::string& c
     std::cout << "[Email] Sending E-Gift Card to " << email << "... SENT.\n";
 }
 
-bool PaymentSystem::processRealMoneyPurchase(const std::string& user, const std::string& itemID, double price, Currency currency) {
+bool PaymentSystem::processRealMoneyPurchase(const std::string& user, const std::string& itemID, double price, Currency currency, const std::string& cardNum, const std::string& cvv) {
     std::cout << "[Store] User " << user << " is purchasing " << itemID << " with Real Money.\n";
 
     // Simulate currency conversion or region check
@@ -86,7 +86,11 @@ bool PaymentSystem::processRealMoneyPurchase(const std::string& user, const std:
         std::cout << "[Store] Converting foreign currency to USD for processing...\n";
     }
 
-    return processPayment(user, price, PaymentMethod::CREDIT_CARD, "StoredCard-Token-123");
+    // Combine Card Number and CVV for the secure processing pipeline
+    // In reality, this data is passed securely to the Tokenizer
+    std::string securePayload = cardNum + "|" + cvv;
+
+    return processPayment(user, price, PaymentMethod::CREDIT_CARD, securePayload);
 }
 
 void PaymentSystem::openSecureBillingForm(const std::string& user) {

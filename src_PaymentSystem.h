@@ -30,7 +30,8 @@ public:
     static void emailGiftCard(const std::string& email, const std::string& code);
 
     // Real Money / Endgame Purchases
-    static bool processRealMoneyPurchase(const std::string& user, const std::string& itemID, double price, Currency currency);
+    // Now accepts raw card details passed from the UI
+    static bool processRealMoneyPurchase(const std::string& user, const std::string& itemID, double price, Currency currency, const std::string& cardNum, const std::string& cvv);
 
     // Secure billing form (mock)
     static void openSecureBillingForm(const std::string& user);
