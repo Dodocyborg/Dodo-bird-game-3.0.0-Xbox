@@ -43,6 +43,24 @@ bool PlatinumAtWork::ProcessTransaction(const std::string& userToken, double amo
 
     // Simulate Network Latency to API Endpoint
     std::cout << "[PlatinumAtWork] Connecting to Banking Network...\n";
+
+    // =========================================================================================
+    //  REAL IMPLEMENTATION STUB (For Go-Live)
+    // =========================================================================================
+    /*
+    // 1. Serialize Request to JSON
+    std::string jsonPayload = "{ \"amount\": " + std::to_string(amount) +
+                              ", \"currency\": \"" + currency +
+                              "\", \"source\": \"" + userToken + "\" }";
+
+    // 2. Send HTTPS POST (using libcurl or similar)
+    // auto response = HttpsClient::Post("https://api.processor.com/v1/charges", jsonPayload, apiKey);
+
+    // 3. Verify Response Code
+    // if (response.status != 200) return false;
+    */
+    // =========================================================================================
+
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
 
     // Simulate API Response
